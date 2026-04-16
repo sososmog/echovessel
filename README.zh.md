@@ -106,7 +106,7 @@ hatch build hook 会把产物复制到 `src/echovessel/channels/web/static/` · 
 EchoVessel 可以通过 Discord DM 和你对话——文本回复 + 启用语音后的原生 OGG Opus 语音消息。
 
 1. 在 <https://discord.com/developers/applications> 创建 application + bot · 在 **Bot → Privileged Gateway Intents** 里打开 **MESSAGE CONTENT INTENT**。
-2. 把 bot token 放进 `~/.echovessel/.env`:
+2. 把 bot token 放进 `.env`:
    ```
    ECHOVESSEL_DISCORD_TOKEN=...
    ```
@@ -123,7 +123,7 @@ EchoVessel 可以通过 Discord DM 和你对话——文本回复 + 启用语音
 
 ### 语音
 
-EchoVessel 的 TTS 用 [FishAudio](https://fish.audio)。把 `FISH_AUDIO_KEY` 放进 `~/.echovessel/.env`,在 `config.toml` 的 `[persona]` 里选一个 `voice_id`,再设 `[persona].voice_enabled = true`,语音就会和文本一起发出。Discord 走原生语音气泡的路径额外需要 `ffmpeg`(MP3 → OGG Opus 转码)。
+EchoVessel 的 TTS 用 [FishAudio](https://fish.audio)。把 `FISH_AUDIO_KEY` 放进 `.env`,在 `config.toml` 的 `[persona]` 里选一个 `voice_id`,再设 `[persona].voice_enabled = true`,语音就会和文本一起发出。Discord 走原生语音气泡的路径额外需要 `ffmpeg`(MP3 → OGG Opus 转码)。
 
 ### 跑测试
 

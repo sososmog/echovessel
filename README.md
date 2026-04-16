@@ -107,7 +107,7 @@ The hatch build hook copies the output into `src/echovessel/channels/web/static/
 EchoVessel can talk to you over Discord DMs — text replies plus native OGG Opus voice messages when voice is enabled.
 
 1. Create an application + bot at <https://discord.com/developers/applications>. Under **Bot → Privileged Gateway Intents**, enable **MESSAGE CONTENT INTENT**.
-2. Copy the bot token into `~/.echovessel/.env`:
+2. Copy the bot token into `.env`:
    ```
    ECHOVESSEL_DISCORD_TOKEN=...
    ```
@@ -124,7 +124,7 @@ EchoVessel can talk to you over Discord DMs — text replies plus native OGG Opu
 
 ### Voice
 
-EchoVessel uses [FishAudio](https://fish.audio) for TTS. Put `FISH_AUDIO_KEY` in `~/.echovessel/.env` and pick a `voice_id` under `[persona]` in `config.toml`. Set `[persona].voice_enabled = true` to emit voice alongside text. The Discord voice-message path additionally requires `ffmpeg` (MP3 → OGG Opus conversion).
+EchoVessel uses [FishAudio](https://fish.audio) for TTS. Put `FISH_AUDIO_KEY` in `.env` and pick a `voice_id` under `[persona]` in `config.toml`. Set `[persona].voice_enabled = true` to emit voice alongside text. The Discord voice-message path additionally requires `ffmpeg` (MP3 → OGG Opus conversion).
 
 ### Running Tests
 

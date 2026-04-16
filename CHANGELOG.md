@@ -20,7 +20,7 @@ to a backend (see **Known Limitations**).
 
 - `echovessel init` writes a starter `~/.echovessel/config.toml` from the bundled sample.
 - `echovessel run | stop | reload | status` manage the daemon lifecycle through a pidfile under `~/.echovessel/`.
-- Auto-loads `~/.echovessel/config.toml` and `~/.echovessel/.env` on startup.
+- Auto-loads `~/.echovessel/config.toml` and `./.env` (from the daemon's working directory) on startup.
 - `SIGTERM` / `SIGINT` trigger a graceful shutdown that flushes in-flight turns.
 - `SIGHUP` (also reachable via `echovessel reload`) reloads `config.toml` and rebuilds the LLM provider in place; in-flight turns keep the old provider via Python reference semantics.
 

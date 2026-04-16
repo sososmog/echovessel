@@ -99,9 +99,10 @@ Out of scope:
 
 A few precautions every user can take:
 
-- Keep `~/.echovessel/.env` mode `0600` (read/write owner only). The
-  daemon does not enforce this, but a leaked `.env` is the most likely
-  source of an API key incident.
+- Keep `.env` mode `0600` (read/write owner only). `echovessel init`
+  sets this when it first writes the template; preserve it when you
+  edit. A leaked `.env` is the most likely source of an API key
+  incident.
 - Bind the Web channel to `127.0.0.1` (the default) rather than `0.0.0.0`.
   The Web UI does not implement authentication; making it reachable from
   the network exposes the persona admin endpoints to any local user or
