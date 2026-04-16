@@ -1,6 +1,6 @@
 # First-Time Setup
 
-> A walkthrough from `pip install echovessel` to chatting with your first persona in the browser — in about ten minutes.
+> A walkthrough from `git clone` to chatting with your first persona in the browser — in about ten minutes.
 
 ## Who this page is for
 
@@ -17,38 +17,28 @@ The walkthrough assumes you are installing on your own machine. EchoVessel is lo
 
 ---
 
-## Step 1 · Install
+## Step 1 · Install (from source)
 
-Pick whichever installer fits your workflow. The core install is a single wheel — under 5 MB — plus its dependencies.
-
-```bash
-# pip (vanilla)
-pip install echovessel
-
-# uv (recommended if you already use uv)
-uv tool install echovessel
-```
-
-Optional extras pull in heavier dependencies for features you may or may not want:
+EchoVessel is **not on PyPI yet**. Clone the repo and sync a local venv with [`uv`](https://github.com/astral-sh/uv):
 
 ```bash
-# LLM SDKs (anthropic, openai) + voice (FishAudio TTS, Whisper STT)
-pip install "echovessel[llm,voice]"
-
-# Local sentence-transformers embeddings
-# (the daemon falls back to a lightweight zero-embedder without this extra)
-pip install "echovessel[embeddings]"
-
-# Discord DM channel adapter
-pip install "echovessel[discord]"
+git clone https://github.com/AlanY1an/echovessel.git
+cd echovessel
+uv sync --all-extras
 ```
 
-The plain `pip install echovessel` with no extras is enough for the zero-key smoke test described in the next step, and for running the Web channel on its own.
+`--all-extras` pulls every optional stack (sentence-transformers embedder · OpenAI + Anthropic SDKs · FishAudio TTS · discord.py). If you want a leaner install, pick only what you need:
+
+```bash
+uv sync --extra embeddings --extra llm --extra voice --extra discord
+```
+
+All subsequent commands run inside the repo with `uv run …`.
 
 Verify the install:
 
 ```bash
-echovessel --help
+uv run echovessel --help
 ```
 
 You should see a short subcommand list including `run`, `stop`, `reload`, and `status`.
@@ -60,7 +50,7 @@ You should see a short subcommand list including `run`, `stop`, `reload`, and `s
 EchoVessel reads a single TOML file at `~/.echovessel/config.toml`. Generate it with:
 
 ```bash
-echovessel init
+uv run echovessel init
 ```
 
 This writes the bundled config sample to `~/.echovessel/config.toml` and creates the data directory if it does not already exist. You will see a line like:
@@ -95,7 +85,7 @@ For the full field reference, see [`configuration.md`](./configuration.md). The 
 ## Step 3 · Run the daemon
 
 ```bash
-echovessel run
+uv run echovessel run
 ```
 
 ### What happens on the first boot
@@ -108,12 +98,12 @@ echovessel run
 
 ### Graceful shutdown
 
-When you are done, press `Ctrl-C` in the terminal where `echovessel run` is running. The daemon unwinds cleanly: it stops the background workers, closes the channels, flushes pending writes, and exits. Your data stays on disk untouched.
+When you are done, press `Ctrl-C` in the terminal where `uv run echovessel run` is running. The daemon unwinds cleanly: it stops the background workers, closes the channels, flushes pending writes, and exits. Your data stays on disk untouched.
 
 You can also shut down from another terminal:
 
 ```bash
-echovessel stop
+uv run echovessel stop
 ```
 
 This sends the same signal the keystroke does and works even if the `run` terminal is attached to a long-running `nohup`.
@@ -179,7 +169,7 @@ The voice path uses FishAudio for text-to-speech and OpenAI Whisper for speech-t
     tts_provider = "fishaudio"
     fishaudio_api_key_env = "FISHAUDIO_API_KEY"
     ```
-4. Restart the daemon: `Ctrl-C` in the run terminal, then `echovessel run` again.
+4. Restart the daemon: `Ctrl-C` in the run terminal, then `uv run echovessel run` again.
 5. In the browser admin panel, flip the "Voice enabled" toggle on.
 
 From that point forward, persona replies come with an audio player and reply text is spoken in whichever voice you picked. The toggle is a runtime switch — you can turn voice back off mid-conversation without losing memory or history.
@@ -197,10 +187,7 @@ The same persona can speak on multiple channels at once, and they share a single
 1. Create a new application at [https://discord.com/developers/applications](https://discord.com/developers/applications) and add a bot to it.
 2. Enable the Message Content Intent under the bot's Privileged Gateway Intents.
 3. Copy the bot token.
-4. Install the optional dependency:
-    ```bash
-    pip install "echovessel[discord]"
-    ```
+4. Make sure you installed with the Discord extra (either `uv sync --all-extras` or `uv sync --extra discord`).
 5. Export the token:
     ```bash
     export ECHOVESSEL_DISCORD_TOKEN=your_token_here
@@ -221,7 +208,7 @@ The full walkthrough — including inviting the bot, allowlisting specific Disco
 ## Troubleshooting
 
 **Config file not found.**
-You probably skipped Step 2. Run `echovessel init` to create `~/.echovessel/config.toml`, then try `echovessel run` again. Alternatively, pass an explicit path: `echovessel run --config /path/to/config.toml`.
+You probably skipped Step 2. Run `uv run echovessel init` to create `~/.echovessel/config.toml`, then try `uv run echovessel run` again. Alternatively, pass an explicit path: `uv run echovessel run --config /path/to/config.toml`.
 
 **Port 7777 already in use.**
 Another process is holding the default Web port. Either stop it, or edit `[channels.web].port` in your config and restart the daemon. The browser auto-open path reads the configured port, so no other changes are needed.
@@ -239,7 +226,7 @@ The sentence-transformers embedder downloads ~90 MB the first time you run the d
 You are on the `stub` LLM provider (Step 2 smoke test). Edit `[llm].provider` back to a real provider (`openai_compat` or `anthropic`) and restart.
 
 **I edited `config.toml` and nothing changed.**
-Some sections reload on `SIGHUP`, others require a full restart. The `[llm]` section reloads live; structural sections like `[channels.*]`, `[persona]`, and `[memory]` require `Ctrl-C` + `echovessel run`. See [`configuration.md`](./configuration.md) for the exact reload matrix.
+Some sections reload on `SIGHUP`, others require a full restart. The `[llm]` section reloads live; structural sections like `[channels.*]`, `[persona]`, and `[memory]` require `Ctrl-C` + `uv run echovessel run`. See [`configuration.md`](./configuration.md) for the exact reload matrix.
 
 ---
 

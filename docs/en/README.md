@@ -8,14 +8,16 @@ EchoVessel is a local-first Python daemon that runs a long-lived digital persona
 
 ## Getting started
 
-**New here?** The **[First-Time Setup](./first-time-setup.md)** guide walks you from `pip install echovessel` to chatting with your first persona in the browser — about ten minutes end to end.
+**New here?** The **[First-Time Setup](./first-time-setup.md)** guide walks you from `git clone` + `uv sync --all-extras` to chatting with your first persona in the browser — about ten minutes end to end.
 
 Quick summary for the impatient:
 
 ```bash
-pip install echovessel
-echovessel init         # writes ~/.echovessel/config.toml
-echovessel run          # opens http://localhost:7777/ on first boot
+git clone https://github.com/AlanY1an/echovessel.git
+cd echovessel
+uv sync --all-extras
+uv run echovessel init         # writes ~/.echovessel/config.toml
+uv run echovessel run          # opens http://localhost:7777/ on first boot
 ```
 
 `Ctrl-C` cleanly shuts the daemon down. See [`configuration.md`](./configuration.md) for every config field, and [`runtime.md`](./runtime.md) for what happens during startup.

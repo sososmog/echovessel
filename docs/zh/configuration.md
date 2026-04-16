@@ -7,7 +7,7 @@ EchoVessel 的所有运行时状态都从一份 TOML 配置文件读入。本页
 Daemon 默认读取 `~/.echovessel/config.toml`。起步模板打包在安装包内 `echovessel/resources/config.toml.sample`，用 `init` 子命令一键生成工作副本:
 
 ```bash
-echovessel init
+uv run echovessel init
 ```
 
 这会把 sample 写到 `~/.echovessel/config.toml`。传 `--force` 覆盖现有文件,传 `--config-path PATH` 指定其他位置。无论 source checkout 还是 wheel 安装,`init` 都通过 `importlib.resources` 读 sample,不走文件系统路径。

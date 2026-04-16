@@ -7,7 +7,7 @@ EchoVessel reads all of its runtime state from a single TOML file. This page is 
 The daemon looks for its configuration at `~/.echovessel/config.toml`. The starting point is the annotated template bundled inside the installed package at `echovessel/resources/config.toml.sample`. Create a working copy with the `init` subcommand:
 
 ```bash
-echovessel init
+uv run echovessel init
 ```
 
 This writes `~/.echovessel/config.toml` from the bundled sample. Pass `--force` to overwrite an existing file, or `--config-path PATH` to target a different location. The `init` command works identically for source checkouts and wheel installs — it reads the sample via `importlib.resources`, not by filesystem path.

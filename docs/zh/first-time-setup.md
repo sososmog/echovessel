@@ -1,6 +1,6 @@
 # 首次启动指南
 
-> 从 `pip install echovessel` 到在浏览器里跟第一个 persona 对话的完整流程——约十分钟。
+> 从 `git clone` + `uv sync --all-extras` 到在浏览器里跟第一个 persona 对话的完整流程——约十分钟。
 
 ## 谁适合看这篇
 
@@ -17,38 +17,28 @@
 
 ---
 
-## 第 1 步 · 安装
+## 第 1 步 · 从源码安装
 
-按你顺手的工具选一个。核心 wheel 本身不到 5 MB,加上必要依赖。
-
-```bash
-# pip(传统方式)
-pip install echovessel
-
-# uv(如果你已经在用 uv,推荐这个)
-uv tool install echovessel
-```
-
-可选的 extra 把更重的依赖按需拉进来:
+EchoVessel **目前还没发 PyPI**。从 GitHub clone · 用 [`uv`](https://github.com/astral-sh/uv) 同步一个本地 venv:
 
 ```bash
-# LLM SDK(anthropic / openai)+ 语音(FishAudio TTS · Whisper STT)
-pip install "echovessel[llm,voice]"
-
-# 本地 sentence-transformers 嵌入
-# (不装也没关系,daemon 会用轻量的零嵌入兜底)
-pip install "echovessel[embeddings]"
-
-# Discord DM channel 适配
-pip install "echovessel[discord]"
+git clone https://github.com/AlanY1an/echovessel.git
+cd echovessel
+uv sync --all-extras
 ```
 
-光装 `pip install echovessel` 不带任何 extra 已经够跑下一步的零密钥烟测,也够单独把 Web channel 跑起来。
+`--all-extras` 一次把所有可选栈全拉进来(sentence-transformers embedder · OpenAI + Anthropic SDK · FishAudio TTS · discord.py)。只想装用得到的:
+
+```bash
+uv sync --extra embeddings --extra llm --extra voice --extra discord
+```
+
+下面所有命令都在 repo 根目录用 `uv run …` 跑。
 
 验证安装:
 
 ```bash
-echovessel --help
+uv run echovessel --help
 ```
 
 你会看到一个短小的子命令列表,包含 `run` · `stop` · `reload` · `status`。
@@ -60,7 +50,7 @@ echovessel --help
 EchoVessel 读一份 TOML 文件 · 默认位置是 `~/.echovessel/config.toml`。生成它:
 
 ```bash
-echovessel init
+uv run echovessel init
 ```
 
 这会把打包的配置样板写到 `~/.echovessel/config.toml`,顺便创建数据目录(如果还没有)。你会看到类似这样一行:
@@ -95,7 +85,7 @@ api_key_env = ""
 ## 第 3 步 · 启动 daemon
 
 ```bash
-echovessel run
+uv run echovessel run
 ```
 
 ### 首次启动会发生什么
@@ -108,12 +98,12 @@ echovessel run
 
 ### 优雅退出
 
-结束时在跑 `echovessel run` 的终端按 `Ctrl-C`。Daemon 会干净收尾:停掉后台 worker · 关 channels · 刷写挂起的写入 · 退出。硬盘上的数据原封不动。
+结束时在跑 `uv run echovessel run` 的终端按 `Ctrl-C`。Daemon 会干净收尾:停掉后台 worker · 关 channels · 刷写挂起的写入 · 退出。硬盘上的数据原封不动。
 
 也可以从另一个终端停:
 
 ```bash
-echovessel stop
+uv run echovessel stop
 ```
 
 效果等同于按 `Ctrl-C`。`run` 终端接了 `nohup` 也能用这条关掉。
@@ -179,7 +169,7 @@ echovessel stop
     tts_provider = "fishaudio"
     fishaudio_api_key_env = "FISHAUDIO_API_KEY"
     ```
-4. 重启 daemon:run 终端里 `Ctrl-C` · 然后再 `echovessel run`
+4. 重启 daemon:run 终端里 `Ctrl-C` · 然后再 `uv run echovessel run`
 5. 在浏览器 admin 面板里把 "Voice enabled" toggle 打开
 
 从此 persona 回复会带一个音频播放器 · 回复文字会用你挑的音色说出来。Toggle 是运行时开关 · 你可以对话中途把语音关回去 · 不会丢记忆也不会丢历史。
@@ -197,10 +187,7 @@ provider 选项 · 声音克隆工作流 · 完整语音配置参考都在 [`voi
 1. 在 [https://discord.com/developers/applications](https://discord.com/developers/applications) 建一个 application · 往里加一个 bot
 2. 在 bot 的 Privileged Gateway Intents 里启用 Message Content Intent
 3. 复制 bot token
-4. 装可选依赖:
-    ```bash
-    pip install "echovessel[discord]"
-    ```
+4. 确认你装了 Discord extra(`uv sync --all-extras` 或 `uv sync --extra discord`)。
 5. export token:
     ```bash
     export ECHOVESSEL_DISCORD_TOKEN=your_token_here
@@ -221,7 +208,7 @@ provider 选项 · 声音克隆工作流 · 完整语音配置参考都在 [`voi
 ## 常见问题
 
 **"Config file not found"。**
-你多半跳过了第 2 步。跑 `echovessel init` 生成 `~/.echovessel/config.toml`,再试 `echovessel run`。或者显式传路径:`echovessel run --config /path/to/config.toml`。
+你多半跳过了第 2 步。跑 `uv run echovessel init` 生成 `~/.echovessel/config.toml`,再试 `uv run echovessel run`。或者显式传路径:`uv run echovessel run --config /path/to/config.toml`。
 
 **Port 7777 already in use。**
 别的进程占住了 Web 默认端口。要么干掉它,要么改 config 里 `[channels.web].port` 再重启 daemon。浏览器自动打开会读配置里的端口 · 不用再改别的。
@@ -239,7 +226,7 @@ provider 选项 · 声音克隆工作流 · 完整语音配置参考都在 [`voi
 你在用 `stub` LLM provider(第 2 步的烟测路径)。把 `[llm].provider` 改回真实 provider(`openai_compat` 或 `anthropic`)再重启。
 
 **我改了 `config.toml` 但没生效。**
-一部分 section 支持 `SIGHUP` 热重载 · 其他的要完全重启。`[llm]` section 支持热重载 · `[channels.*]` · `[persona]` · `[memory]` 这些结构性 section 都要 `Ctrl-C` + 重新 `echovessel run`。完整的重载矩阵在 [`configuration.md`](./configuration.md)。
+一部分 section 支持 `SIGHUP` 热重载 · 其他的要完全重启。`[llm]` section 支持热重载 · `[channels.*]` · `[persona]` · `[memory]` 这些结构性 section 都要 `Ctrl-C` + 重新 `uv run echovessel run`。完整的重载矩阵在 [`configuration.md`](./configuration.md)。
 
 ---
 
