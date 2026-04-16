@@ -26,6 +26,7 @@ import type {
   DaemonState,
   DeleteChoice,
   DeleteResponse,
+  EventDependentsResponse,
   ImportCancelPayload,
   ImportCancelResponse,
   ImportEstimatePayload,
@@ -36,12 +37,21 @@ import type {
   ImportUploadTextPayload,
   MemoryEvent,
   MemoryListResponse,
+  MemorySearchResponse,
+  MemorySearchType,
   MemoryThought,
   OnboardingPayload,
   OnboardingResponse,
+  PersonaBootstrapRequest,
+  PersonaBootstrapResponse,
   PersonaStateApi,
   PersonaUpdatePayload,
   PreviewDeleteResponse,
+  ThoughtTraceResponse,
+  VoiceActivateResponse,
+  VoiceCloneResponse,
+  VoiceSampleListResponse,
+  VoiceSampleUploadResponse,
   VoiceToggleResponse,
 } from './types'
 import { ApiError } from './types'
@@ -124,6 +134,31 @@ export async function postOnboarding(
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+/**
+ * POST /api/admin/persona/bootstrap-from-material — Worker κ.
+ *
+ * Wait for an import pipeline to finish (started inline via
+ * `upload_id` or already running via `pipeline_id`) and ask the LLM
+ * for five suggested core blocks. Blocking: can take tens of seconds
+ * for a large material; the returned blocks are DRAFTS that the user
+ * should edit + commit via `postOnboarding`.
+ *
+ * The backend imposes a 10-minute server-side timeout on the pipeline
+ * wait; if you want a shorter UX timeout, add `AbortController` logic
+ * client-side.
+ */
+export async function postPersonaBootstrapFromMaterial(
+  payload: PersonaBootstrapRequest,
+): Promise<PersonaBootstrapResponse> {
+  return fetchJson<PersonaBootstrapResponse>(
+    '/api/admin/persona/bootstrap-from-material',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
 }
 
 /**
@@ -340,6 +375,63 @@ export async function deleteMemoryThought(
   )
 }
 
+/**
+ * GET /api/admin/memory/search — keyword search over L3 events + L4
+ * thoughts via the SQLite FTS5 index. ``q`` is the user's query
+ * string (server-side sanitised); ``type`` scopes to events / thoughts
+ * / both; ``tag`` is an optional exact-match filter on the
+ * ``emotion_tags`` or ``relational_tags`` JSON arrays.
+ *
+ * Returns hits in matched-relevance order plus a parallel array of
+ * ``{node_id, snippet}`` objects whose ``snippet`` field is server-
+ * rendered HTML containing only ``<b>…</b>`` tags around matched
+ * substrings (for highlighting in the admin search UI).
+ */
+export async function searchMemory(
+  q: string,
+  opts: {
+    type?: MemorySearchType
+    tag?: string | null
+    limit?: number
+    offset?: number
+  } = {},
+): Promise<MemorySearchResponse> {
+  const params = new URLSearchParams({ q })
+  if (opts.type) params.set('type', opts.type)
+  if (opts.tag) params.set('tag', opts.tag)
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  if (opts.offset !== undefined) params.set('offset', String(opts.offset))
+  return fetchJson<MemorySearchResponse>(
+    `/api/admin/memory/search?${params.toString()}`,
+  )
+}
+
+/**
+ * GET /api/admin/memory/thoughts/{id}/trace — list the L3 events that
+ * produced this L4 thought plus the set of source sessions. Returns
+ * empty arrays (not 404) when the thought exists but has no live
+ * filling lineage.
+ */
+export async function getThoughtTrace(
+  nodeId: number,
+): Promise<ThoughtTraceResponse> {
+  return fetchJson<ThoughtTraceResponse>(
+    `/api/admin/memory/thoughts/${nodeId}/trace`,
+  )
+}
+
+/**
+ * GET /api/admin/memory/events/{id}/dependents — list the L4 thoughts
+ * derived from this L3 event. Reverse direction of `getThoughtTrace`.
+ */
+export async function getEventDependents(
+  nodeId: number,
+): Promise<EventDependentsResponse> {
+  return fetchJson<EventDependentsResponse>(
+    `/api/admin/memory/events/${nodeId}/dependents`,
+  )
+}
+
 // ─── Cost endpoints (Worker ζ) ──────────────────────────────────────────
 
 /** GET /api/admin/cost/summary?range=today|7d|30d */
@@ -358,5 +450,90 @@ export async function getCostRecent(
   return fetchJson<CostRecentResponse>(
     `/api/admin/cost/recent?limit=${limit}`,
   )
+}
+
+// ─── Voice clone wizard (Worker λ) ──────────────────────────────────────
+
+/**
+ * POST /api/admin/voice/samples — upload one audio sample via multipart.
+ * Backend stores it under <data_dir>/voice_samples/{sample_id}/ and
+ * returns the generated sample_id.
+ */
+export async function postVoiceSampleUpload(
+  file: File,
+): Promise<VoiceSampleUploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch('/api/admin/voice/samples', {
+    method: 'POST',
+    body: form,
+  })
+  if (!response.ok) {
+    const detail = await extractDetail(response)
+    throw new ApiError(response.status, detail)
+  }
+  return (await response.json()) as VoiceSampleUploadResponse
+}
+
+/** GET /api/admin/voice/samples — list every draft sample. */
+export async function getVoiceSamples(): Promise<VoiceSampleListResponse> {
+  return fetchJson<VoiceSampleListResponse>('/api/admin/voice/samples')
+}
+
+/** DELETE /api/admin/voice/samples/{sample_id} — drop one draft sample. */
+export async function deleteVoiceSample(
+  sampleId: string,
+): Promise<{ deleted: true; sample_id: string }> {
+  return fetchJson<{ deleted: true; sample_id: string }>(
+    `/api/admin/voice/samples/${encodeURIComponent(sampleId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+/**
+ * POST /api/admin/voice/clone — train a voice from the current draft
+ * samples. Requires at least `minimum_required` samples (default 3).
+ */
+export async function postVoiceClone(
+  displayName: string,
+): Promise<VoiceCloneResponse> {
+  return fetchJson<VoiceCloneResponse>('/api/admin/voice/clone', {
+    method: 'POST',
+    body: JSON.stringify({ display_name: displayName }),
+  })
+}
+
+/**
+ * POST /api/admin/voice/preview — render `text` through `voice_id` and
+ * return the resulting MP3 as a Blob the UI can feed into `<audio>`.
+ */
+export async function postVoicePreview(
+  voiceId: string,
+  text: string,
+): Promise<Blob> {
+  const response = await fetch('/api/admin/voice/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voice_id: voiceId, text }),
+  })
+  if (!response.ok) {
+    const detail = await extractDetail(response)
+    throw new ApiError(response.status, detail)
+  }
+  return await response.blob()
+}
+
+/**
+ * POST /api/admin/voice/activate — persist voice_id to config.toml via
+ * the daemon's atomic write and mirror it in-memory so the next turn
+ * uses the new voice.
+ */
+export async function postVoiceActivate(
+  voiceId: string,
+): Promise<VoiceActivateResponse> {
+  return fetchJson<VoiceActivateResponse>('/api/admin/voice/activate', {
+    method: 'POST',
+    body: JSON.stringify({ voice_id: voiceId }),
+  })
 }
 

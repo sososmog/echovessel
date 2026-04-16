@@ -140,6 +140,59 @@ CREATE VIRTUAL TABLE IF NOT EXISTS concept_nodes_vec USING vec0(
 )
 """
 
+# Worker θ · Memory search FTS5 index over ConceptNode.description.
+# We use the same trigram tokenizer as recall_messages_fts so CJK
+# substring search works. ``description`` is the ONLY indexed column —
+# emotion_tags / relational_tags filtering happens with regular
+# WHERE clauses on the JSON columns (Worker θ scope: don't widen the
+# index this round).
+_CONCEPT_FTS_CREATE = """
+CREATE VIRTUAL TABLE IF NOT EXISTS concept_nodes_fts USING fts5(
+    description,
+    content='concept_nodes',
+    content_rowid='id',
+    tokenize='trigram'
+)
+"""
+
+_CONCEPT_FTS_TRIGGER_INSERT = """
+CREATE TRIGGER IF NOT EXISTS concept_fts_insert
+AFTER INSERT ON concept_nodes
+BEGIN
+    INSERT INTO concept_nodes_fts(rowid, description)
+    VALUES (new.id, new.description);
+END
+"""
+
+_CONCEPT_FTS_TRIGGER_DELETE = """
+CREATE TRIGGER IF NOT EXISTS concept_fts_delete
+AFTER DELETE ON concept_nodes
+BEGIN
+    INSERT INTO concept_nodes_fts(concept_nodes_fts, rowid, description)
+    VALUES('delete', old.id, old.description);
+END
+"""
+
+_CONCEPT_FTS_TRIGGER_UPDATE = """
+CREATE TRIGGER IF NOT EXISTS concept_fts_update
+AFTER UPDATE ON concept_nodes
+BEGIN
+    INSERT INTO concept_nodes_fts(concept_nodes_fts, rowid, description)
+    VALUES('delete', old.id, old.description);
+    INSERT INTO concept_nodes_fts(rowid, description)
+    VALUES (new.id, new.description);
+END
+"""
+
+# Backfill any concept_nodes rows that exist on disk but are missing
+# from the FTS index — covers both the legacy DB upgrade path AND
+# the case where a fresh DB had rows seeded before FTS triggers fired.
+_CONCEPT_FTS_BACKFILL = """
+INSERT INTO concept_nodes_fts(rowid, description)
+SELECT id, description FROM concept_nodes
+WHERE id NOT IN (SELECT rowid FROM concept_nodes_fts)
+"""
+
 
 def create_all_tables(engine: Engine) -> None:
     """Create all tables and virtual indexes for the memory system.
@@ -169,3 +222,12 @@ def create_all_tables(engine: Engine) -> None:
         conn.execute(text(_FTS_TRIGGER_DELETE))
         conn.execute(text(_FTS_TRIGGER_UPDATE))
         conn.execute(text(_VEC_CREATE))
+        # Worker θ · concept_nodes FTS5 index for the admin search bar.
+        conn.execute(text(_CONCEPT_FTS_CREATE))
+        conn.execute(text(_CONCEPT_FTS_TRIGGER_INSERT))
+        conn.execute(text(_CONCEPT_FTS_TRIGGER_DELETE))
+        conn.execute(text(_CONCEPT_FTS_TRIGGER_UPDATE))
+        # Idempotent backfill — covers legacy DBs and fresh DBs that
+        # had rows seeded before the trigger existed (e.g. tests that
+        # bulk-INSERT then build their first FTS index).
+        conn.execute(text(_CONCEPT_FTS_BACKFILL))

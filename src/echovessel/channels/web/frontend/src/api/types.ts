@@ -93,6 +93,42 @@ export interface OnboardingResponse {
   persona_id: string
 }
 
+// ─── HTTP · POST /api/admin/persona/bootstrap-from-material ─────────────
+
+/**
+ * Worker κ · Body for the onboarding "upload material" flow.
+ *
+ * At least one of ``upload_id`` / ``pipeline_id`` MUST be supplied.
+ * ``persona_display_name`` is an optional hint the LLM can weave into
+ * the generated blocks — the ACTUAL display name is set later via
+ * ``POST /api/admin/persona/onboarding``.
+ */
+export interface PersonaBootstrapRequest {
+  upload_id?: string
+  pipeline_id?: string
+  persona_display_name?: string
+}
+
+/**
+ * Response from bootstrap-from-material. ``suggested_blocks`` is the
+ * LLM's five-block draft, presented to the user for review before
+ * they click "完成" (which POSTs to /api/admin/persona/onboarding).
+ *
+ * Empty blocks are returned as empty strings, not omitted keys.
+ */
+export interface PersonaBootstrapResponse {
+  suggested_blocks: {
+    persona_block: string
+    self_block: string
+    user_block: string
+    mood_block: string
+    relationship_block: string
+  }
+  source_event_count: number
+  source_thought_count: number
+  pipeline_status: string
+}
+
 // ─── HTTP · POST /api/admin/persona ──────────────────────────────────────
 
 /**
@@ -333,6 +369,32 @@ export interface MemoryListResponse<T> {
 }
 
 /**
+ * Compact concept-node shape returned inside the provenance trace
+ * responses. Narrower than :type:`MemoryEvent` / :type:`MemoryThought`
+ * because the trace UI only needs id + description + date + source
+ * session to render an inline-expand row.
+ */
+export interface TraceNode {
+  id: number
+  description: string
+  created_at: string | null
+  source_session_id: string | null
+}
+
+/** Response from ``GET /api/admin/memory/thoughts/{id}/trace``. */
+export interface ThoughtTraceResponse {
+  thought_id: number
+  source_events: TraceNode[]
+  source_sessions: string[]
+}
+
+/** Response from ``GET /api/admin/memory/events/{id}/dependents``. */
+export interface EventDependentsResponse {
+  event_id: number
+  dependent_thoughts: TraceNode[]
+}
+
+/**
  * Response from POST /api/admin/memory/preview-delete. Used to
  * decide whether to show the "keep / cascade / cancel" dialog before
  * issuing the DELETE.
@@ -351,6 +413,39 @@ export interface DeleteResponse {
   deleted: true
   node_id: number
   choice: DeleteChoice
+}
+
+// ─── HTTP · GET /api/admin/memory/search ────────────────────────────────
+
+/** ``type`` discriminator on the search route. */
+export type MemorySearchType = 'events' | 'thoughts' | 'all'
+
+/**
+ * One ``{node_id, snippet}`` row in the search response. ``snippet``
+ * is server-rendered HTML containing only ``<b>…</b>`` tags around
+ * matched terms — see :func:`stripUnsafeTags` for the client-side
+ * sanitiser used before injecting via ``dangerouslySetInnerHTML``.
+ */
+export interface MemorySearchSnippet {
+  node_id: number
+  snippet: string
+}
+
+/**
+ * Response from ``GET /api/admin/memory/search``. ``items`` is a
+ * heterogeneous list of :type:`MemoryEvent` / :type:`MemoryThought`
+ * when ``type=all``; the discriminator is each item's own
+ * ``node_type`` field.
+ */
+export interface MemorySearchResponse {
+  q: string
+  type: MemorySearchType
+  tag: string | null
+  limit: number
+  offset: number
+  total: number
+  items: (MemoryEvent | MemoryThought)[]
+  matched_snippets: MemorySearchSnippet[]
 }
 
 // ─── HTTP · GET /api/admin/cost/* ───────────────────────────────────────
@@ -634,6 +729,47 @@ export interface ConfigPatchResponse {
   updated_fields: string[]
   reload_triggered: boolean
   restart_required: string[]
+}
+
+// ─── Voice clone wizard (Worker λ) ──────────────────────────────────────
+
+/**
+ * One draft voice sample uploaded during the clone wizard.
+ * `duration_seconds` is nullable in MVP because the backend does not
+ * probe audio duration yet — the UI renders "—" when absent.
+ */
+export interface VoiceSample {
+  sample_id: string
+  filename: string
+  size_bytes: number
+  duration_seconds: number | null
+  created_at: string
+}
+
+export interface VoiceSampleListResponse {
+  samples: VoiceSample[]
+  count: number
+  minimum_required: number
+}
+
+export interface VoiceSampleUploadResponse {
+  sample_id: string
+  duration_seconds: number | null
+  size_bytes: number
+  accepted: true
+}
+
+export interface VoiceCloneResponse {
+  voice_id: string
+  display_name: string
+  preview_text: string
+  /** Null when the provider succeeded at clone but preview TTS failed. */
+  preview_audio_url: string | null
+}
+
+export interface VoiceActivateResponse {
+  activated: true
+  voice_id: string
 }
 
 // ─── Error class ─────────────────────────────────────────────────────────

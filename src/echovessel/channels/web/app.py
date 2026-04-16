@@ -104,7 +104,13 @@ def build_web_app(
     # Runtime. Tests that exercise chat routes in isolation can pass
     # ``runtime=None`` and skip the admin surface entirely.
     if runtime is not None:
-        app.include_router(build_admin_router(runtime=runtime))
+        app.include_router(
+            build_admin_router(
+                runtime=runtime,
+                voice_service=voice_service,
+                importer_facade=importer_facade,
+            )
+        )
 
     # Worker E (v0.0.2) · admin-import routes are mounted only when
     # both the runtime and a live ImporterFacade are available. The

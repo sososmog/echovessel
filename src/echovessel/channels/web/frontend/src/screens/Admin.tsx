@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import type { AdminTab } from '../types'
@@ -15,12 +15,15 @@ import type {
   PersonaStateApi,
   PersonaUpdatePayload,
   PreviewDeleteResponse,
+  TraceNode,
 } from '../api/types'
 import { ApiError } from '../api/types'
 import { getCostRecent, getCostSummary } from '../api/client'
 import { useConfig } from '../hooks/useConfig'
 import { useMemoryEvents } from '../hooks/useMemoryEvents'
+import { useMemorySearch } from '../hooks/useMemorySearch'
 import { useMemoryThoughts } from '../hooks/useMemoryThoughts'
+import { useMemoryTrace } from '../hooks/useMemoryTrace'
 
 interface AdminProps {
   persona: PersonaStateApi
@@ -39,6 +42,14 @@ const TABS: { id: AdminTab; label: string; sub: string }[] = [
   { id: 'config', label: '配置', sub: 'coming soon' },
 ]
 
+// Shared shape for the cross-tab "jump-to-lineage" flow:
+// clicking an event in a thought-trace switches to Events + highlights
+// that event; clicking a thought in an event-dependents list switches
+// to Thoughts + highlights that thought.
+export interface CrossNav {
+  navigateTo(kind: 'event' | 'thought', id: number): void
+}
+
 export function Admin({
   persona,
   daemonState,
@@ -47,6 +58,19 @@ export function Admin({
   onBackToChat,
 }: AdminProps) {
   const [tab, setTab] = useState<AdminTab>('persona')
+  // Pending highlight set by a cross-tab jump. The target tab reads
+  // this, scrolls its row into view, flashes it briefly, then clears.
+  const [highlight, setHighlight] = useState<{
+    kind: 'event' | 'thought'
+    id: number
+  } | null>(null)
+
+  const crossNav: CrossNav = {
+    navigateTo: (kind, id) => {
+      setTab(kind === 'event' ? 'events' : 'thoughts')
+      setHighlight({ kind, id })
+    },
+  }
 
   return (
     <div className="admin-wrap">
@@ -83,8 +107,24 @@ export function Admin({
           {tab === 'persona' && (
             <PersonaTab persona={persona} onUpdate={updatePersona} />
           )}
-          {tab === 'events' && <EventsTab />}
-          {tab === 'thoughts' && <ThoughtsTab />}
+          {tab === 'events' && (
+            <EventsTab
+              highlightId={
+                highlight?.kind === 'event' ? highlight.id : null
+              }
+              clearHighlight={() => setHighlight(null)}
+              crossNav={crossNav}
+            />
+          )}
+          {tab === 'thoughts' && (
+            <ThoughtsTab
+              highlightId={
+                highlight?.kind === 'thought' ? highlight.id : null
+              }
+              clearHighlight={() => setHighlight(null)}
+              crossNav={crossNav}
+            />
+          )}
           {tab === 'voice' && (
             <VoiceTab
               voiceEnabled={persona.voice_enabled}
@@ -319,7 +359,13 @@ function BlockEditor({
 // Events tab — paginated L3 list with per-row delete (W-α + W-β)
 // ═══════════════════════════════════════════════════════════
 
-function EventsTab() {
+interface TraceTabProps {
+  highlightId: number | null
+  clearHighlight: () => void
+  crossNav: CrossNav
+}
+
+function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
   const {
     items,
     total,
@@ -331,6 +377,7 @@ function EventsTab() {
     previewDelete,
     deleteEvent,
   } = useMemoryEvents()
+  const search = useMemorySearch('events')
 
   const handleDelete = async (item: MemoryEvent) => {
     try {
@@ -345,6 +392,16 @@ function EventsTab() {
     }
   }
 
+  // Worker θ · when the search is active, replace the default
+  // pagination list with the filtered results. Snippets are
+  // rendered inline (see `MemoryRow`'s `snippet` prop).
+  const showingSearch = search.active
+  const visibleItems = (
+    showingSearch ? search.results : items
+  ) as MemoryEvent[]
+  const visibleTotal = showingSearch ? search.total : total
+  const tabError = error || search.error
+
   return (
     <div className="admin-section">
       <div className="admin-section-head">
@@ -358,9 +415,45 @@ function EventsTab() {
         </p>
       </div>
 
-      {error && <div className="admin-error-banner">{error}</div>}
+      <MemorySearchBar
+        value={search.query}
+        onChange={search.setQuery}
+        onClear={search.clear}
+        loading={search.loading}
+        active={showingSearch}
+        total={search.total}
+      />
 
-      {loading && items.length === 0 ? (
+      {tabError && <div className="admin-error-banner">{tabError}</div>}
+
+      {showingSearch ? (
+        search.loading && visibleItems.length === 0 ? (
+          <div className="memory-list-loading">搜索中…</div>
+        ) : visibleTotal === 0 ? (
+          <div className="memory-list-empty">
+            <div className="memory-list-empty-glyph">🔍</div>
+            <div className="memory-list-empty-title">没有匹配的事件</div>
+            <p className="memory-list-empty-desc">
+              试试更宽泛的关键词,或者点"清除"返回完整列表。
+            </p>
+          </div>
+        ) : (
+          <ul className="memory-list">
+            {visibleItems.map((it) => (
+              <MemoryRow
+                key={it.id}
+                kind="event"
+                item={it}
+                highlighted={highlightId === it.id}
+                onHighlightConsumed={clearHighlight}
+                onDelete={() => void handleDelete(it)}
+                crossNav={crossNav}
+                snippet={search.snippets.get(it.id)}
+              />
+            ))}
+          </ul>
+        )
+      ) : loading && items.length === 0 ? (
         <div className="memory-list-loading">载入中…</div>
       ) : total === 0 ? (
         <div className="memory-list-empty">
@@ -374,37 +467,20 @@ function EventsTab() {
       ) : (
         <ul className="memory-list">
           {items.map((it) => (
-            <li key={it.id} className="memory-list-item">
-              <div className="memory-list-row-head">
-                <time className="memory-list-time">
-                  {formatTimestamp(it.created_at)}
-                </time>
-                <button
-                  type="button"
-                  className="memory-list-delete"
-                  onClick={() => void handleDelete(it)}
-                  aria-label={`删除事件 ${it.id}`}
-                  title="删除这条事件"
-                >
-                  ×
-                </button>
-              </div>
-              <p className="memory-list-desc">{it.description}</p>
-              {it.emotion_tags.length > 0 && (
-                <div className="memory-list-pills">
-                  {it.emotion_tags.map((tag) => (
-                    <span key={tag} className="memory-list-pill">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </li>
+            <MemoryRow
+              key={it.id}
+              kind="event"
+              item={it}
+              highlighted={highlightId === it.id}
+              onHighlightConsumed={clearHighlight}
+              onDelete={() => void handleDelete(it)}
+              crossNav={crossNav}
+            />
           ))}
         </ul>
       )}
 
-      {hasMore && (
+      {!showingSearch && hasMore && (
         <div className="memory-list-more">
           <button
             type="button"
@@ -424,7 +500,7 @@ function EventsTab() {
 // Thoughts tab — paginated L4 list with per-row delete (W-α + W-β)
 // ═══════════════════════════════════════════════════════════
 
-function ThoughtsTab() {
+function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
   const {
     items,
     total,
@@ -436,6 +512,7 @@ function ThoughtsTab() {
     previewDelete,
     deleteThought,
   } = useMemoryThoughts()
+  const search = useMemorySearch('thoughts')
 
   const handleDelete = async (item: MemoryThought) => {
     try {
@@ -447,6 +524,13 @@ function ThoughtsTab() {
       console.error('delete thought failed', err)
     }
   }
+
+  const showingSearch = search.active
+  const visibleItems = (
+    showingSearch ? search.results : items
+  ) as MemoryThought[]
+  const visibleTotal = showingSearch ? search.total : total
+  const tabError = error || search.error
 
   return (
     <div className="admin-section">
@@ -462,9 +546,45 @@ function ThoughtsTab() {
         </p>
       </div>
 
-      {error && <div className="admin-error-banner">{error}</div>}
+      <MemorySearchBar
+        value={search.query}
+        onChange={search.setQuery}
+        onClear={search.clear}
+        loading={search.loading}
+        active={showingSearch}
+        total={search.total}
+      />
 
-      {loading && items.length === 0 ? (
+      {tabError && <div className="admin-error-banner">{tabError}</div>}
+
+      {showingSearch ? (
+        search.loading && visibleItems.length === 0 ? (
+          <div className="memory-list-loading">搜索中…</div>
+        ) : visibleTotal === 0 ? (
+          <div className="memory-list-empty">
+            <div className="memory-list-empty-glyph">🔍</div>
+            <div className="memory-list-empty-title">没有匹配的印象</div>
+            <p className="memory-list-empty-desc">
+              试试更宽泛的关键词,或者点"清除"返回完整列表。
+            </p>
+          </div>
+        ) : (
+          <ul className="memory-list">
+            {visibleItems.map((it) => (
+              <MemoryRow
+                key={it.id}
+                kind="thought"
+                item={it}
+                highlighted={highlightId === it.id}
+                onHighlightConsumed={clearHighlight}
+                onDelete={() => void handleDelete(it)}
+                crossNav={crossNav}
+                snippet={search.snippets.get(it.id)}
+              />
+            ))}
+          </ul>
+        )
+      ) : loading && items.length === 0 ? (
         <div className="memory-list-loading">载入中…</div>
       ) : total === 0 ? (
         <div className="memory-list-empty">
@@ -477,28 +597,20 @@ function ThoughtsTab() {
       ) : (
         <ul className="memory-list">
           {items.map((it) => (
-            <li key={it.id} className="memory-list-item">
-              <div className="memory-list-row-head">
-                <time className="memory-list-time">
-                  {formatTimestamp(it.created_at)}
-                </time>
-                <button
-                  type="button"
-                  className="memory-list-delete"
-                  onClick={() => void handleDelete(it)}
-                  aria-label={`删除印象 ${it.id}`}
-                  title="删除这条印象"
-                >
-                  ×
-                </button>
-              </div>
-              <p className="memory-list-desc">{it.description}</p>
-            </li>
+            <MemoryRow
+              key={it.id}
+              kind="thought"
+              item={it}
+              highlighted={highlightId === it.id}
+              onHighlightConsumed={clearHighlight}
+              onDelete={() => void handleDelete(it)}
+              crossNav={crossNav}
+            />
           ))}
         </ul>
       )}
 
-      {hasMore && (
+      {!showingSearch && hasMore && (
         <div className="memory-list-more">
           <button
             type="button"
@@ -512,6 +624,355 @@ function ThoughtsTab() {
       )}
     </div>
   )
+}
+
+// ─── Worker θ · MemorySearchBar (shared by Events / Thoughts tabs) ──────
+
+interface MemorySearchBarProps {
+  value: string
+  onChange: (v: string) => void
+  onClear: () => void
+  loading: boolean
+  active: boolean
+  total: number
+}
+
+function MemorySearchBar({
+  value,
+  onChange,
+  onClear,
+  loading,
+  active,
+  total,
+}: MemorySearchBarProps) {
+  return (
+    <div className="memory-search-bar">
+      <span className="memory-search-icon" aria-hidden>
+        🔍
+      </span>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="搜索关键词…"
+        className="memory-search-input"
+        aria-label="搜索 memory"
+      />
+      {active && (
+        <span className="memory-search-meta">
+          {loading ? '搜索中…' : `${total} 条`}
+        </span>
+      )}
+      {value && (
+        <button
+          type="button"
+          className="memory-search-clear"
+          onClick={onClear}
+          aria-label="清除搜索"
+        >
+          清除
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Server-rendered search snippets contain only ``<b>…</b>`` tags
+ * around matched terms. We allowlist the tag explicitly and strip
+ * everything else before piping through ``dangerouslySetInnerHTML`` —
+ * that way the snippet stays safe even if a future backend change
+ * starts emitting other markup.
+ */
+export function sanitiseSnippet(raw: string): string {
+  // Strip every tag that is NOT <b>/</b>. Pattern matches `<...>` then
+  // we keep the literal `<b>` / `</b>` and drop everything else.
+  return raw.replace(/<(?!\/?b\b)[^>]*>/gi, '')
+}
+
+// ─── Memory row + inline trace expansion (Worker ι) ────────────────────
+//
+// `<MemoryRow>` wraps the existing card markup and adds:
+//
+//   - The "trace" toggle button (📚 for thoughts, 🪞 for events)
+//   - An inline-expand region that fetches lineage via `useMemoryTrace`
+//   - A cross-tab jump: clicking a related node switches tabs + flashes
+//   - Highlight flash: when `highlighted` is true, scrollIntoView + a
+//     transient CSS pulse via the `.is-highlighted` modifier
+//
+// No new CSS classes are introduced. The expansion uses inline styles
+// so the rest of the app's CSS vocabulary is untouched.
+
+interface MemoryRowProps {
+  kind: 'event' | 'thought'
+  item: MemoryEvent | MemoryThought
+  highlighted: boolean
+  onHighlightConsumed: () => void
+  onDelete: () => void
+  crossNav: CrossNav
+  /** Worker θ — when present, replaces the plain ``description`` with
+   *  the server's snippet HTML (``<b>…</b>`` allowlist, sanitised). */
+  snippet?: string
+}
+
+function MemoryRow({
+  kind,
+  item,
+  highlighted,
+  onHighlightConsumed,
+  onDelete,
+  crossNav,
+  snippet,
+}: MemoryRowProps) {
+  const [expanded, setExpanded] = useState(false)
+  const liRef = useRef<HTMLLIElement | null>(null)
+  const trace = useMemoryTrace({ kind, nodeId: item.id })
+
+  // Cross-tab jump: when Admin sets us as the highlight target, scroll
+  // into view and let the CSS pulse play. Clear the highlight state
+  // after the animation so the next navigation can re-trigger it.
+  useEffect(() => {
+    if (!highlighted) return
+    const node = liRef.current
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    const timer = window.setTimeout(onHighlightConsumed, 1800)
+    return () => window.clearTimeout(timer)
+  }, [highlighted, onHighlightConsumed])
+
+  const handleToggle = () => {
+    if (!expanded && trace.data === null) {
+      void trace.load()
+    }
+    setExpanded((v) => !v)
+  }
+
+  const eventRow = kind === 'event' && item.node_type === 'event'
+    ? (item as MemoryEvent)
+    : null
+  const toggleLabel =
+    kind === 'thought' ? '📚 来源' : '🪞 印象'
+
+  const expandedNodes: TraceNode[] = (() => {
+    if (!trace.data) return []
+    if (trace.data.kind === 'thought') return trace.data.response.source_events
+    return trace.data.response.dependent_thoughts
+  })()
+
+  const liClassName = [
+    'memory-list-item',
+    expanded ? 'is-expanded' : '',
+    highlighted ? 'is-highlighted' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <li ref={liRef} className={liClassName}>
+      <div className="memory-list-row-head">
+        <time className="memory-list-time">{formatTimestamp(item.created_at)}</time>
+        <button
+          type="button"
+          className="memory-list-delete"
+          onClick={onDelete}
+          aria-label={`删除 ${kind === 'event' ? '事件' : '印象'} ${item.id}`}
+          title={kind === 'event' ? '删除这条事件' : '删除这条印象'}
+        >
+          ×
+        </button>
+      </div>
+
+      {snippet ? (
+        <p
+          className="memory-list-desc memory-list-desc--snippet"
+          dangerouslySetInnerHTML={{ __html: sanitiseSnippet(snippet) }}
+        />
+      ) : (
+        <p className="memory-list-desc">{item.description}</p>
+      )}
+
+      {eventRow !== null && eventRow.emotion_tags.length > 0 && (
+        <div className="memory-list-pills">
+          {eventRow.emotion_tags.map((tag) => (
+            <span key={tag} className="memory-list-pill">
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Trace toggle — inline-expand, no modal. `data` being null
+          after load() + !loading means "successful empty" which we
+          render as a small note so the user knows we actually looked. */}
+      <div style={{ marginTop: 4 }}>
+        <button
+          type="button"
+          onClick={handleToggle}
+          style={traceToggleBtn}
+          disabled={trace.loading}
+        >
+          {trace.loading
+            ? '查找中⋯'
+            : `${toggleLabel}${
+                trace.data
+                  ? ` ${expandedNodes.length} 条`
+                  : ''
+              } ${expanded ? '▾' : '▸'}`}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={traceExpansionPanel}>
+          {trace.error !== null && (
+            <div style={traceError}>⚠ {trace.error}</div>
+          )}
+          {!trace.loading &&
+            trace.data !== null &&
+            expandedNodes.length === 0 && (
+              <div style={traceEmpty}>
+                {kind === 'thought'
+                  ? '这条印象还没有被任何事件支撑 (可能反思链已被清空)'
+                  : '还没有印象从这条事件里沉淀出来'}
+              </div>
+            )}
+          {expandedNodes.length > 0 && (
+            <ul style={traceList}>
+              {expandedNodes.map((n) => (
+                <li key={n.id} style={traceListItem}>
+                  <button
+                    type="button"
+                    style={traceJumpBtn}
+                    onClick={() =>
+                      crossNav.navigateTo(
+                        kind === 'thought' ? 'event' : 'thought',
+                        n.id,
+                      )
+                    }
+                    title={`跳到${
+                      kind === 'thought' ? '事件' : '印象'
+                    } ${n.id}`}
+                  >
+                    <div style={traceJumpMeta}>
+                      <span>{formatTimestamp(n.created_at)}</span>
+                      {n.source_session_id && (
+                        <span style={{ opacity: 0.6 }}>
+                          · {n.source_session_id.slice(0, 8)}…
+                        </span>
+                      )}
+                    </div>
+                    <div style={traceJumpDesc}>
+                      {truncate(n.description, 120)}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {trace.data?.kind === 'thought' &&
+            trace.data.response.source_sessions.length > 0 && (
+              <div style={traceSessionsRow}>
+                来自 {trace.data.response.source_sessions.length} 个 session
+              </div>
+            )}
+        </div>
+      )}
+    </li>
+  )
+}
+
+const traceToggleBtn: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--cream-soft)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  padding: '4px 0',
+  cursor: 'pointer',
+}
+
+const traceExpansionPanel: React.CSSProperties = {
+  marginTop: 10,
+  paddingTop: 12,
+  borderTop: '1px dashed var(--thread)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+}
+
+const traceError: React.CSSProperties = {
+  color: 'rgba(255, 120, 120, 0.8)',
+  fontFamily: 'var(--font-serif)',
+  fontSize: 13,
+}
+
+const traceEmpty: React.CSSProperties = {
+  color: 'var(--cream-soft)',
+  fontFamily: 'var(--font-serif)',
+  fontStyle: 'italic',
+  fontSize: 13,
+}
+
+const traceList: React.CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+}
+
+const traceListItem: React.CSSProperties = {
+  margin: 0,
+}
+
+const traceJumpBtn: React.CSSProperties = {
+  width: '100%',
+  textAlign: 'left',
+  background: 'rgba(255,255,255,0.02)',
+  border: '1px solid rgba(255,255,255,0.06)',
+  borderRadius: 8,
+  padding: '10px 12px',
+  color: 'var(--cream)',
+  cursor: 'pointer',
+  transition: 'border-color 0.2s ease, background 0.2s ease',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  fontFamily: 'var(--font-serif)',
+}
+
+const traceJumpMeta: React.CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10,
+  letterSpacing: '0.1em',
+  color: 'var(--cream-dim)',
+  textTransform: 'uppercase',
+}
+
+const traceJumpDesc: React.CSSProperties = {
+  fontSize: 14,
+  lineHeight: 1.4,
+  color: 'var(--cream)',
+}
+
+const traceSessionsRow: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: 'var(--cream-soft)',
+  paddingTop: 4,
+}
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text
+  return text.slice(0, max - 1) + '…'
 }
 
 // ─── Helpers shared by Events / Thoughts tabs ───────────────────────────
@@ -585,6 +1046,7 @@ function VoiceTab({
   toggleVoice: (enabled: boolean) => Promise<void>
 }) {
   const [toggling, setToggling] = useState(false)
+  const navigate = useNavigate()
 
   const handleToggle = async () => {
     setToggling(true)
@@ -605,6 +1067,24 @@ function VoiceTab({
         <p className="admin-section-lead">
           控制 persona 是否用 TTS 语音朗读回复。
         </p>
+      </div>
+
+      <div className="admin-hint-card" style={{ marginBottom: 16 }}>
+        <div className="admin-hint-glyph">🎙</div>
+        <div className="admin-hint-body">
+          <div className="admin-hint-title">想让 persona 用你的声音说话？</div>
+          <div className="admin-hint-desc">
+            上传 3 段以上的纯净录音，
+            训练一个属于你自己的 voice · 20-60s 完成 · 可以试听后再激活。
+          </div>
+        </div>
+        <button
+          type="button"
+          className="admin-hint-btn"
+          onClick={() => navigate('/admin/voice/clone')}
+        >
+          克隆新声音 →
+        </button>
       </div>
 
       <div className="voice-card" style={{ marginBottom: 24 }}>

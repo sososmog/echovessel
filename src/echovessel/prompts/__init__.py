@@ -33,6 +33,18 @@ from echovessel.prompts.judge import (
     format_judge_user_prompt,
     parse_judge_response,
 )
+from echovessel.prompts.persona_bootstrap import (
+    MAX_MOOD_BLOCK_CHARS,
+    MAX_PERSONA_BLOCK_CHARS,
+    MAX_RELATIONSHIP_BLOCK_CHARS,
+    MAX_SELF_BLOCK_CHARS,
+    MAX_USER_BLOCK_CHARS,
+    PERSONA_BOOTSTRAP_SYSTEM_PROMPT,
+    BootstrappedBlocks,
+    PersonaBootstrapParseError,
+    format_persona_bootstrap_user_prompt,
+    parse_persona_bootstrap_response,
+)
 from echovessel.prompts.reflection import (
     MAX_THOUGHTS,
     RECOMMENDED_IMPACT_BOUND,
@@ -73,4 +85,15 @@ __all__ = [
     "JudgeVerdict",
     "format_judge_user_prompt",
     "parse_judge_response",
+    # persona bootstrap
+    "PERSONA_BOOTSTRAP_SYSTEM_PROMPT",
+    "MAX_PERSONA_BLOCK_CHARS",
+    "MAX_SELF_BLOCK_CHARS",
+    "MAX_USER_BLOCK_CHARS",
+    "MAX_MOOD_BLOCK_CHARS",
+    "MAX_RELATIONSHIP_BLOCK_CHARS",
+    "BootstrappedBlocks",
+    "PersonaBootstrapParseError",
+    "format_persona_bootstrap_user_prompt",
+    "parse_persona_bootstrap_response",
 ]

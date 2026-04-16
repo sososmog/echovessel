@@ -53,7 +53,12 @@ from echovessel.memory.observers import (
     register_observer,
     unregister_observer,
 )
-from echovessel.memory.retrieve import list_concept_nodes, list_recall_messages
+from echovessel.memory.retrieve import (
+    ConceptSearchHit,
+    list_concept_nodes,
+    list_recall_messages,
+    search_concept_nodes,
+)
 
 __all__ = [
     # Models
@@ -89,4 +94,6 @@ __all__ = [
     # Queries
     "list_recall_messages",
     "list_concept_nodes",
+    "search_concept_nodes",
+    "ConceptSearchHit",
 ]

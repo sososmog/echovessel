@@ -9,6 +9,7 @@ import { Chat } from './screens/Chat'
 import { Onboarding } from './screens/Onboarding'
 import { Admin } from './screens/Admin'
 import { ImportScreen } from './screens/Import'
+import { VoiceClone } from './screens/VoiceClone'
 import { usePersona } from './hooks/usePersona'
 import type {
   DaemonState,
@@ -147,6 +148,10 @@ function AdminRoute({
       <Route
         path="import"
         element={<ImportScreen onBack={() => navigate('/admin')} />}
+      />
+      <Route
+        path="voice/clone"
+        element={<VoiceClone onBack={() => navigate('/admin')} />}
       />
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
