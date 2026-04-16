@@ -164,7 +164,7 @@ Turns the voice module on or off. If this whole section is missing or `enabled =
 
 ## `[channels.*]`
 
-One subsection per transport. The phase 1 release ships the Web channel only; Discord, iMessage, and WeChat have placeholder sections so you can see where they will live.
+One subsection per transport. v0.0.1 ships **two** working channels: the Web UI at `127.0.0.1:7777/` and a Discord DM bot. iMessage and WeChat sections exist as placeholders so the config shape is stable, but those adapters are not implemented yet.
 
 ### `[channels.web]`
 
@@ -176,7 +176,19 @@ One subsection per transport. The phase 1 release ships the Web channel only; Di
 | `port` | `7777` | Bind port. |
 | `static_dir` | `"embedded"` | Where the built frontend lives. `"embedded"` uses the bundled static files that ship with the wheel; an absolute path lets you serve your own build during development. |
 
-### `[channels.discord]`, `[channels.imessage]`, `[channels.wechat]`
+### `[channels.discord]`
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `enabled` | `false` | Whether to start the Discord DM bot. |
+| `channel_id` | `"discord"` | Stable identifier. |
+| `token_env` | `"ECHOVESSEL_DISCORD_TOKEN"` | Environment variable that holds the Discord bot token. |
+| `debounce_ms` | `2000` | How long to wait for more messages before dispatching one logical turn. |
+| `allowed_user_ids` | `[]` (empty = unrestricted) | Optional allowlist of Discord user IDs. |
+
+Enable the channel, put the bot token in `./.env`, and restart the daemon. Messages sent via Discord stream into the Web chat timeline as well (see the runtime-mirror architecture in `channels.md`).
+
+### `[channels.imessage]`, `[channels.wechat]`
 
 These sections exist in the template as placeholders. They currently only read `enabled` and `channel_id`; setting `enabled = true` on them will not start a real channel yet. Actual adapters land in later releases.
 

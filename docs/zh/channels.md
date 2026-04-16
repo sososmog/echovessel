@@ -2,6 +2,8 @@
 
 ## 概述
 
+> 🧭 **命名说明。** EchoVessel 的 **channel**(代码和本文档里都用这个词)本质上是 API-infra 术语里的 **有状态 message gateway**。每条 channel 负责在一条外部传输的协议(Discord WebSocket、Web UI 的 HTTP POST + SSE、未来 iMessage 的 webhook 等)和 daemon 内部统一的 `IncomingTurn` / `OutgoingMessage` 格式之间做双向翻译,同时持有翻译所需的连接级状态(debounce 计时器、in-flight turn 追踪、per-user DM 路由)。"Channel"是偏 chat UX 味道的叫法——我们保留它,是因为终端用户在 Discord / Slack / iMessage 里看到的就是"频道"这个概念。如果你更习惯用 "gateway" 这个思维模型,两者在本模块里指同一样东西;代码里会继续用 "channel"。
+
 **Channel 是"哑"的 I/O 适配器。** 一个 channel 独占一条外部传输——Web UI、Discord、iMessage、WeChat——它的唯一职责是把文字在那条传输和 daemon 其余部分之间来回搬运。Channel 不调 LLM、不读记忆、不决定 persona 说什么、也不保存 persona 状态。所有"思考"发生在上一层：`runtime` + `memory` + prompt 组装器。如果一个 channel 实现开始想缓存 mood block 或跑一次 retrieval 查询,这个设计就错了。
 
 **一个 persona,多张嘴。** Channel 系统根部的架构承诺是:不管 persona 在多少条传输上说话,它都是一个连续的身份。同一个用户早上在 Web UI 上和 persona 聊天、晚上切到 Discord 接着聊,persona 会原封不动地记得早上的对话——不是因为每条 channel 各自带一份记忆,而是因为记忆只有一份存储,而且**永远不按传输分片**。记忆检索不接收任何 `channel_id` 过滤参数,将来也不会接收。这是整个模块最吃重的一条铁律:一旦被打破,"同一个 persona"的幻觉立刻崩塌,每条 channel 就会退化成互相独立的 bot。
@@ -190,11 +192,21 @@ Debounce 状态只被一个协程(channel 内部的 ingest 循环)修改。Runti
 
 Runtime 的 `ChannelRegistry` 管理生命周期(`start_all` / `stop_all`),并通过 `registry.all_incoming()` 把每条已注册 channel 的 `incoming()` 合并成一条异步流。`TurnDispatcher` 从这条合并流里读,并喂给一个**单线**的串行 handler——所以哪怕同时活着四条 channel,也永远只有一个 turn 在处理。这是故意的:这是让 memory 写入和 LLM 调用可以放心假设"没有并发 mutation"的那条保障。
 
-### Web channel 原型
+### Web channel
 
-当前代码库在 `src/echovessel/channels/web/frontend/` 下带了一份 Web channel 前端的独立原型。它是一个 Vite + TypeScript 应用,自己就能跑(`npm install && npm run dev`),所有状态都 mock 在 `localStorage` 里——不需要后端。它存在的意义是让前端布局、SSE 事件形状、交互 pattern 可以独立于 Python daemon 迭代。
+Web channel 已完整端到端接通。`src/echovessel/channels/web/` 下的 FastAPI `WebChannel` 暴露 `POST /api/chat/send`、通过 `GET /api/chat/events` 用 SSE 推 `chat.message.*` 事件、实现上面描述的 debounce 状态机、并通过 Channel Protocol 和 runtime 对话。`src/echovessel/channels/web/frontend/` 下的 React + Vite + TypeScript 前端通过 `npm run build` 编译进 `channels/web/static/`,daemon 在 `http://127.0.0.1:7777/` 直接托管——终端用户不需要 Node.js。想 hack UI 的贡献者可以 `npm run dev` 连着一个活 daemon(dev server 代理到 FastAPI 进程)。
 
-完整的后端接线——一个 FastAPI `WebChannel`,暴露 `POST /api/message`、用 SSE 推 `chat.message.*` 事件、实现上面描述的 debounce 状态机、并通过 Channel Protocol 和 runtime 对话——在 roadmap 上,尚未落地。落地之后它会住在 `src/echovessel/channels/web/backend/` 下,实现 `base.py` 里的 `Channel` Protocol。
+### 跨 channel 统一 timeline(runtime 级 SSE broadcaster)
+
+EchoVessel 的架构承诺是"一个 persona 跨所有 channel"。Memory 层一直在存储层保证这一点(iron rule D4:retrieval 永不按 `channel_id` 过滤)。从 2026-04-16 起 **live view** 也统一了:
+
+- `SSEBroadcaster` 由 runtime 持有,不属于任何单个 channel。
+- 每个 channel 的 turn 事件(`chat.message.user_appended` / `chat.message.token` / `chat.message.done` / `chat.message.voice_ready`)都经 broadcaster mirror · 带 `source_channel_id` 字段标记 turn 来源。
+- Web chat timeline 订阅统一 SSE 流 · Discord DM 实时出现在 Web 页面 · 时间戳旁带 `📱 Discord` 角标。iMessage 和未来 channel 继承这套行为 —— **无需前端修改**,只要 channel 实现 Channel Protocol 且 turn 走 `runtime.assemble_turn()`。
+- 配对的 `GET /api/chat/history?limit=50&before=<turn_id>` 端点返回跨 channel 历史(仍然 D4-不过滤)· 新浏览器 session 会把过去 Discord 对话和 Web 对话一起回填。
+- Turn 串行化仍然成立:`TurnDispatcher` 在整个进程里一次只处理一个 turn · "一个 persona 一个脑子" 不变。并发 Web + Discord 请求只是排队。
+
+publish 路径有失败隔离:如果 broadcaster 抛异常 · 只打 `log.warning`,原 channel 的 `send()` 照常完成。反过来,如果 `send()` 抛异常,`chat.message.done` **不会** mirror —— 一个失败的 Discord DM 不会告诉 Web tab turn 成功了。
 
 ---
 

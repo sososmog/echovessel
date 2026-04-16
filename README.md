@@ -1,8 +1,12 @@
-# EchoVessel
+<p align="center">
+  <img src="./docs/assets/banner.png" alt="EchoVessel — a digital persona engine" width="640">
+</p>
 
-[![CI](https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml/badge.svg)](https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml)
-
-> 🌐 **Read this in another language:** [中文](./README.zh.md)
+<p align="center">
+  <a href="https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml"><img src="https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  &nbsp;·&nbsp;
+  🌐 <a href="./README.zh.md">中文</a>
+</p>
 
 *Some people leave behind memories.  
 Some leave behind a voice.  

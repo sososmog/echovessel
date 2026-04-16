@@ -37,7 +37,7 @@ EchoVessel/
 │   ├── memory/               L1-L4 persona memory
 │   ├── voice/                TTS, STT, voice cloning
 │   ├── channels/             Channel Protocol + concrete channels
-│   │   └── web/frontend/     React 19 + Vite + TypeScript UI prototype
+│   │   └── web/frontend/     React 19 + Vite + TypeScript UI source (built into `web/static/`)
 │   ├── proactive/            autonomous messaging engine
 │   ├── prompts/              system prompts for extraction, reflection, interaction
 │   ├── import_/              universal LLM importer pipeline

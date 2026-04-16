@@ -1,0 +1,1659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EchoVessel — Runtime Interactions &amp; Memory Flows</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #fafbfc;
+    color: #1a1a2e;
+    padding: 60px 40px;
+    min-width: 1200px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  h1 span { color: #94a3b8; font-weight: 400; }
+  h2 { font-size: 20px; font-weight: 700; margin: 40px 0 16px; letter-spacing: -0.3px; }
+  h2 .h-sub { font-size: 13px; color: #64748b; font-weight: 400; margin-left: 12px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 20px 0 10px; color: #334155; }
+
+  .header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 12px; padding-bottom: 16px; border-bottom: 2px solid #e2e8f0;
+  }
+  .meta { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+
+  .intro {
+    background: linear-gradient(180deg, #eff6ff 0%, #fff 40%);
+    border: 1.5px solid #93c5fd; border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 32px;
+    font-size: 13px; color: #1e40af; line-height: 1.6;
+  }
+  .intro strong { color: #1e3a8a; }
+  .intro code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #dbeafe; padding: 1px 6px; border-radius: 4px; font-size: 11px;
+  }
+
+  .panel {
+    border: 1.5px solid #e2e8f0; border-radius: 14px;
+    background: #fff; overflow: hidden; margin-bottom: 24px;
+  }
+  .panel-head {
+    padding: 16px 24px 12px; display: flex;
+    justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .panel-title { font-size: 16px; font-weight: 700; }
+  .panel-sub { font-size: 11px; color: #64748b; font-family: 'JetBrains Mono', monospace; }
+  .tag {
+    font-size: 9px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 12px;
+  }
+  .tag-blue { background: #dbeafe; color: #1e40af; }
+  .tag-green { background: #d1fae5; color: #065f46; }
+  .tag-amber { background: #fef3c7; color: #92400e; }
+  .tag-purple { background: #ede9fe; color: #5b21b6; }
+  .tag-pink { background: #fce7f3; color: #9d174d; }
+  .tag-red { background: #fee2e2; color: #991b1b; }
+  .panel-body { padding: 16px 24px 20px; }
+
+  code.mono {
+    font-family: 'JetBrains Mono', monospace;
+    background: #f1f5f9; padding: 1px 6px; border-radius: 3px;
+    font-size: 11px; color: #334155;
+  }
+
+  /* ── Memory layer sidebar (colored L1–L4) ── */
+  .mem-bar {
+    display: flex; gap: 4px; margin: 12px 0 20px;
+  }
+  .mem-chip {
+    padding: 8px 12px; border-radius: 6px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 600; color: #fff;
+  }
+  .mem-chip.l1 { background: #6366f1; }
+  .mem-chip.l2 { background: #0ea5e9; }
+  .mem-chip.l3 { background: #10b981; }
+  .mem-chip.l4 { background: #f59e0b; }
+  .mem-chip .lv { font-size: 14px; font-weight: 800; letter-spacing: -0.5px; }
+  .mem-chip .nm { font-size: 11px; opacity: 0.92; }
+
+  /* ── Activation Flow ── */
+  .activation {
+    display: grid;
+    grid-template-columns: 48px 120px 1fr 1fr 1fr;
+    gap: 1px;
+    background: #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+  }
+  .activation > div {
+    background: #fff;
+    padding: 10px 14px;
+    font-size: 11px;
+    color: #334155;
+    line-height: 1.45;
+  }
+  .activation .act-head {
+    background: #f8fafc;
+    font-weight: 700; font-size: 10px;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: #64748b;
+  }
+  .activation .act-step {
+    background: #1e293b; color: #fff;
+    font-weight: 700; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .activation .act-what {
+    font-weight: 600; font-size: 12px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .activation .act-what .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+  .dot.d-l1 { background: #6366f1; }
+  .dot.d-l2 { background: #0ea5e9; }
+  .dot.d-l3 { background: #10b981; }
+  .dot.d-l4 { background: #f59e0b; }
+  .dot.d-run { background: #475569; }
+  .dot.d-prompt { background: #a855f7; }
+  .dot.d-ch { background: #ec4899; }
+  .activation .act-detail {
+    font-size: 10.5px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #334155; line-height: 1.5;
+  }
+  .activation .act-read { color: #0f766e; }
+  .activation .act-write { color: #b45309; }
+  .activation .act-broad { color: #7c3aed; }
+
+  /* ── Matrix ── */
+  .matrix-wrap { overflow-x: auto; }
+  .matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .matrix th {
+    padding: 10px 8px;
+    background: #f1f5f9; color: #475569;
+    font-weight: 700; font-size: 10px;
+    letter-spacing: 1px; text-transform: uppercase;
+    border: 1px solid #e2e8f0;
+  }
+  .matrix td {
+    padding: 8px;
+    border: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+  .matrix td.mx-layer {
+    font-weight: 700; color: #fff;
+    text-align: center; vertical-align: middle;
+    font-size: 12px;
+  }
+  .matrix td.mx-layer.l1 { background: #6366f1; }
+  .matrix td.mx-layer.l2 { background: #0ea5e9; }
+  .matrix td.mx-layer.l3 { background: #10b981; }
+  .matrix td.mx-layer.l4 { background: #f59e0b; }
+  .matrix code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    background: #f8fafc;
+    padding: 1px 4px;
+    border-radius: 3px;
+    display: inline-block;
+    margin: 1px 0;
+  }
+  .matrix .op-read { color: #0f766e; }
+  .matrix .op-write { color: #b45309; }
+  .matrix td ul { padding-left: 14px; margin: 2px 0; }
+  .matrix td li { font-size: 10.5px; line-height: 1.5; padding: 1px 0; }
+
+  /* ── Story trace ── */
+  .story {
+    background: linear-gradient(180deg, #fefce8 0%, #fff 40%);
+    border: 1.5px solid #fde047; border-radius: 12px;
+    padding: 18px 22px; margin: 12px 0;
+  }
+  .story h4 {
+    font-size: 14px; color: #713f12; font-weight: 700;
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .story h4::before {
+    content: '📖';
+  }
+  .story-msg {
+    font-family: 'JetBrains Mono', monospace;
+    background: #fff; padding: 8px 14px;
+    border-left: 3px solid #f59e0b;
+    font-size: 12px; color: #1a1a2e;
+    margin: 8px 0 16px;
+  }
+  .story-trace {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .story-step {
+    display: grid;
+    grid-template-columns: 90px 50px 1fr;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #fff;
+    border: 1px solid #fef3c7; border-radius: 6px;
+    font-size: 11px;
+  }
+  .story-step .ss-time {
+    font-family: 'JetBrains Mono', monospace;
+    color: #92400e; font-weight: 600;
+    font-size: 10px;
+  }
+  .story-step .ss-badge {
+    display: flex; align-items: center; justify-content: center;
+    height: 20px; border-radius: 4px;
+    font-size: 9px; font-weight: 700; color: #fff;
+  }
+  .ss-badge.b-l1 { background: #6366f1; }
+  .ss-badge.b-l2 { background: #0ea5e9; }
+  .ss-badge.b-l3 { background: #10b981; }
+  .ss-badge.b-l4 { background: #f59e0b; }
+  .ss-badge.b-run { background: #475569; }
+  .ss-badge.b-ch { background: #ec4899; }
+  .ss-badge.b-llm { background: #a855f7; }
+  .story-step .ss-text { color: #334155; line-height: 1.5; }
+  .story-step code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #fef3c7; padding: 1px 5px; border-radius: 3px;
+    font-size: 10px;
+  }
+
+  /* ── Timeline ── */
+  .tl-wrap {
+    position: relative;
+    padding: 30px 0 20px;
+    margin: 12px 0;
+  }
+  .tl-axis {
+    position: relative;
+    height: 2px;
+    background: #e2e8f0;
+    margin: 40px 40px;
+  }
+  .tl-event {
+    position: absolute;
+    top: -8px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    cursor: default;
+  }
+  .tl-event .tl-label {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    white-space: nowrap;
+    color: #334155;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .tl-event .tl-sublabel {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: #94a3b8;
+    white-space: nowrap;
+  }
+  .tl-event.e-user { background: #0ea5e9; }
+  .tl-event.e-persona { background: #8b5cf6; }
+  .tl-event.e-idle { background: #94a3b8; }
+  .tl-event.e-close { background: #ef4444; }
+  .tl-event.e-extract { background: #10b981; }
+  .tl-event.e-reflect { background: #f59e0b; }
+
+  /* ── Feedback loop diagram (mood) ── */
+  .loop {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr 60px 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .loop-node {
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .loop-node .ln-name { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+  .loop-node .ln-desc { font-size: 10px; color: #64748b; line-height: 1.4; }
+  .loop-node.trigger { border-color: #93c5fd; background: #eff6ff; }
+  .loop-node.layer { border-color: #6366f1; background: #eef2ff; }
+  .loop-node.observer { border-color: #c4b5fd; background: #f5f3ff; }
+  .loop-node.channel { border-color: #f9a8d4; background: #fdf2f8; }
+  .loop-node.ui { border-color: #6ee7b7; background: #f0fdf4; }
+  .loop-arr {
+    display: flex; align-items: center; justify-content: center;
+    color: #94a3b8;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .loop-arr.down { flex-direction: column; font-size: 14px; }
+
+  /* ── Gates (decision tree) ── */
+  .gates {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .gate-row {
+    display: grid;
+    grid-template-columns: 140px 24px 1fr 180px;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 14px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+  }
+  .gate-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 600;
+    color: #475569;
+  }
+  .gate-pass {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #dcfce7; color: #15803d;
+    font-weight: 700; font-size: 12px;
+  }
+  .gate-pass.block { background: #fee2e2; color: #991b1b; }
+  .gate-desc { font-size: 11px; color: #334155; line-height: 1.5; }
+  .gate-src {
+    font-size: 10px; color: #94a3b8;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── Sequence diagram ── */
+  .seq {
+    display: grid;
+    grid-template-columns: 100px 100px 100px 100px 100px 100px 1fr;
+    gap: 0;
+    padding: 16px 0;
+    position: relative;
+    background: #fafbfc;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+  }
+  .seq-col-head {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    text-align: center;
+    padding: 8px 6px;
+    background: #1e293b; color: #fff;
+    border-right: 1px solid #334155;
+  }
+  .seq-col-head:last-child { border-right: none; }
+  .seq-col-head.c-run { background: #475569; }
+  .seq-col-head.c-ch { background: #ec4899; }
+  .seq-col-head.c-l1 { background: #6366f1; }
+  .seq-col-head.c-l2 { background: #0ea5e9; }
+  .seq-col-head.c-l3 { background: #10b981; }
+  .seq-col-head.c-l4 { background: #f59e0b; }
+  .seq-col-head.c-llm { background: #a855f7; }
+  .seq-col-head.c-ui { background: #10b981; }
+
+  .seq-step {
+    display: contents;
+  }
+  .seq-cell {
+    padding: 8px 6px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 10px;
+    text-align: center;
+    position: relative;
+    color: #475569;
+  }
+  .seq-cell.active {
+    background: #eff6ff;
+    font-weight: 600;
+    color: #1e40af;
+  }
+  .seq-cell.active.aL1 { background: #eef2ff; color: #4338ca; }
+  .seq-cell.active.aL2 { background: #e0f2fe; color: #0c4a6e; }
+  .seq-cell.active.aL3 { background: #d1fae5; color: #065f46; }
+  .seq-cell.active.aL4 { background: #fef3c7; color: #92400e; }
+  .seq-cell.active.aLLM { background: #f5f3ff; color: #5b21b6; }
+  .seq-cell.active.aRun { background: #f1f5f9; color: #1e293b; }
+  .seq-cell.active.aCh { background: #fdf2f8; color: #9d174d; }
+  .seq-cell.active.aUI { background: #f0fdf4; color: #065f46; }
+  .seq-text {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 11px;
+    color: #334155;
+    background: #fff;
+    line-height: 1.45;
+  }
+  .seq-text code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #f1f5f9; padding: 1px 4px; border-radius: 3px;
+    font-size: 10px;
+  }
+
+  /* ── Callout ── */
+  .callout {
+    font-size: 11px; color: #64748b; margin-top: 12px;
+    padding: 10px 14px; background: #f8fafc; border-radius: 6px;
+    border-left: 3px solid #93c5fd;
+  }
+  .callout strong { color: #1e40af; }
+  .callout code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #eff6ff; padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* ── Nav links top right ── */
+  .nav-links {
+    display: flex; gap: 12px; font-size: 11px;
+  }
+  .nav-links a {
+    color: #1e40af; text-decoration: none;
+    padding: 4px 10px; border: 1px solid #dbeafe;
+    border-radius: 6px; background: #eff6ff;
+  }
+  .nav-links a:hover { background: #dbeafe; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<div class="header">
+  <div>
+    <h1>EchoVessel <span>Runtime Interactions &amp; Memory Flows</span></h1>
+    <div class="meta" style="margin-top:6px;">"how each layer wakes up" edition · 2026.04 · main @ 1f9bdf6 · companion to <code>architecture.html</code></div>
+  </div>
+  <div class="nav-links">
+    <a href="./architecture.html">↩ static overview</a>
+    <a href="./en/channels.md">channels.md</a>
+    <a href="./en/memory.md">memory.md</a>
+  </div>
+</div>
+
+<div class="intro">
+  <strong>What this page answers:</strong> when a user sends one message, which memory layers <em>wake up</em> in what order, which write their output back where, and how information loops between layers. The static <code>architecture.html</code> shows <strong>what exists</strong>; this one shows <strong>what happens</strong>.
+</div>
+
+<!-- Memory legend -->
+<div class="mem-bar">
+  <div class="mem-chip l1"><span class="lv">L1</span><span class="nm">core_blocks · persona frame</span></div>
+  <div class="mem-chip l2"><span class="lv">L2</span><span class="nm">recall_messages · raw log</span></div>
+  <div class="mem-chip l3"><span class="lv">L3</span><span class="nm">concept_nodes/EVENT · episodic</span></div>
+  <div class="mem-chip l4"><span class="lv">L4</span><span class="nm">concept_nodes/THOUGHT · reflected</span></div>
+</div>
+
+<!-- ═══════════ 0. MEMORY GENESIS ═══════════ -->
+<h2>1. How each memory layer comes into being <span class="h-sub">the distillation rules that graduate raw text into persistent memory</span></h2>
+
+<div class="panel" style="border-color:#6366f1;background:linear-gradient(180deg,#eef2ff 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Memory is the whole point · four layers, three transitions</div>
+      <div class="panel-sub">L1 is authored · L2 is captured · L3 is distilled · L4 is reflected</div>
+    </div>
+    <div class="tag tag-purple">CORE</div>
+  </div>
+  <div class="panel-body">
+
+    <!-- L1 genesis -->
+    <div style="margin-bottom:24px; padding:18px 22px; background:#fff; border-radius:10px; border-left:5px solid #6366f1;">
+      <h3 style="color:#4338ca; margin:0 0 8px;">L1 · <code class="mono" style="font-size:13px;">core_blocks</code> — how the 5 blocks are born</h3>
+      <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:10px;">
+        L1 is the only layer that is <strong>authored, not distilled</strong>. The 5 blocks exist from persona inception onward, written directly by a human (or a bootstrap LLM pass on imported material).
+      </p>
+      <div class="activation">
+        <div class="act-head">Path</div>
+        <div class="act-head">Trigger</div>
+        <div class="act-head">Writer</div>
+        <div class="act-head">Which blocks</div>
+        <div class="act-head">Mechanism</div>
+
+        <div class="act-step" style="background:#6366f1;">①</div>
+        <div class="act-what">Onboarding</div>
+        <div>First run · <code class="mono">/api/admin/persona/onboarding</code></div>
+        <div class="act-detail">persona / self / user / mood</div>
+        <div class="act-detail"><code>memory.onboarding.bootstrap_persona()</code> · one <code>CoreBlock</code> row per label</div>
+
+        <div class="act-step" style="background:#6366f1;">②</div>
+        <div class="act-what">Bootstrap from material</div>
+        <div>Onboarding path 2 · upload → LLM drafts 5 blocks</div>
+        <div class="act-detail">all 5</div>
+        <div class="act-detail">LLM synthesises from imported events/thoughts · user reviews before commit</div>
+
+        <div class="act-step" style="background:#6366f1;">③</div>
+        <div class="act-what">Admin edit</div>
+        <div>Admin → Persona tab · save</div>
+        <div class="act-detail">any block</div>
+        <div class="act-detail"><code>POST /api/admin/persona</code> · partial update · optimistic on-disk write</div>
+
+        <div class="act-step" style="background:#6366f1;">④</div>
+        <div class="act-what">Append-to-block</div>
+        <div>Import pipeline or admin → append existing block</div>
+        <div class="act-detail">any block except mood</div>
+        <div class="act-detail"><code>memory.append_to_core_block()</code> · atomic · writes audit row to <code>core_block_appends</code></div>
+
+        <div class="act-step" style="background:#94a3b8;">⑤</div>
+        <div class="act-what">Mood replace (manual)</div>
+        <div>Admin edit mood block OR v1.0 reflection-driven path (not yet)</div>
+        <div class="act-detail">mood only</div>
+        <div class="act-detail"><code>memory.update_mood_block()</code> · replace-in-place · fires <code>on_mood_updated</code> hook · SSE <code>chat.mood.update</code></div>
+      </div>
+      <div class="callout" style="margin-top:12px; border-left-color:#818cf8;">
+        <strong>MVP truth:</strong> L1 is NOT auto-updated per turn. The <code>mood_block</code> in particular is static unless someone edits it. v1.0 plans to have reflection update mood as a side-effect; today it's manual-only.
+      </div>
+    </div>
+
+    <!-- L2 genesis -->
+    <div style="margin-bottom:24px; padding:18px 22px; background:#fff; border-radius:10px; border-left:5px solid #0ea5e9;">
+      <h3 style="color:#0c4a6e; margin:0 0 8px;">L2 · <code class="mono" style="font-size:13px;">recall_messages</code> — every message captured, verbatim</h3>
+      <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:10px;">
+        L2 is the only layer that is <strong>written during the user-facing turn</strong>. There's no distillation here — every incoming line and every persona reply is persisted verbatim as an atomic row.
+      </p>
+      <div class="activation">
+        <div class="act-head">When</div>
+        <div class="act-head">What is written</div>
+        <div class="act-head">Schema fields</div>
+        <div class="act-head">Indexes</div>
+        <div class="act-head">Output</div>
+
+        <div class="act-step" style="background:#0ea5e9;">🟢</div>
+        <div class="act-what">User msg arrives</div>
+        <div><code class="mono">memory.ingest_message(..., role=USER)</code> before LLM sees anything</div>
+        <div class="act-detail"><code>role, content, channel_id, session_id, turn_id, created_at, token_count, day</code></div>
+        <div class="act-detail">FTS5 trigram · session join · day bucket</div>
+        <div class="act-detail">1 row + FTS index update</div>
+
+        <div class="act-step" style="background:#0ea5e9;">🟢</div>
+        <div class="act-what">Persona reply finalised</div>
+        <div><code class="mono">ingest_message(..., role=PERSONA)</code> after streaming completes</div>
+        <div class="act-detail">same shape · same <code>turn_id</code> · same <code>session_id</code></div>
+        <div class="act-detail">FTS5 gets both sides of the turn</div>
+        <div class="act-detail">1 row</div>
+
+        <div class="act-step" style="background:#0ea5e9;">🟢</div>
+        <div class="act-what">Session open/close</div>
+        <div>Session row tracks <code>status</code>, <code>first_message_at</code>, <code>last_message_at</code>, message count, token count</div>
+        <div class="act-detail"><code>sessions</code> table</div>
+        <div class="act-detail">status transitions: open → closing → consolidating → closed</div>
+        <div class="act-detail">1 row per session</div>
+      </div>
+      <div class="callout" style="margin-top:12px; border-left-color:#38bdf8;">
+        <strong>Why verbatim:</strong> L2 is the ground truth. Later distillations (L3, L4) can go wrong — LLM hallucinates, eval catches a drift. When that happens, we need to go back to L2 to see what actually happened. Never paraphrase at ingest time.
+      </div>
+    </div>
+
+    <!-- L3 genesis · the distillation -->
+    <div style="margin-bottom:24px; padding:18px 22px; background:#fff; border-radius:10px; border-left:5px solid #10b981;">
+      <h3 style="color:#065f46; margin:0 0 8px;">L3 · <code class="mono" style="font-size:13px;">concept_nodes</code> WHERE type=EVENT — the first real distillation</h3>
+      <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:10px;">
+        When a session closes, <code>prompts.extraction.EXTRACTION_SYSTEM_PROMPT</code> asks a SMALL-tier LLM: <em>"given this closed conversation, what is worth remembering?"</em> Output is 0–3 event rows, each with a signed emotional impact and structured tags. This is the layer where <strong>raw text first becomes episodic memory</strong>.
+      </p>
+
+      <h4 style="font-size:13px;color:#334155;margin:14px 0 6px;">What the extraction prompt instructs the LLM to produce</h4>
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:14px 18px; line-height:1.7; color:#065f46;">
+        For each event:<br>
+        &nbsp;&nbsp;&nbsp;<strong>description</strong> · 1–3 sentences in the <em>source language</em> · third-person reference to user<br>
+        &nbsp;&nbsp;&nbsp;<strong>emotional_impact</strong> · <strong>signed</strong> integer in [-10, +10]<br>
+        &nbsp;&nbsp;&nbsp;<strong>emotion_tags</strong> · 0–4 free-form lowercase labels<br>
+        &nbsp;&nbsp;&nbsp;<strong>relational_tags</strong> · 0–3 from the <strong>closed vocabulary</strong> of 6 values
+      </div>
+
+      <h4 style="font-size:13px;color:#334155;margin:18px 0 6px;">Emotional impact scale (from the prompt)</h4>
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <tr><th style="width:60px;">Value</th><th>Meaning (extraction prompt verbatim)</th><th style="width:260px;">Example</th></tr>
+          <tr><td class="mx-layer" style="background:#7f1d1d;">-10</td><td>catastrophic loss, trauma, crisis</td><td>death of close family · suicidal ideation voiced · violence disclosed</td></tr>
+          <tr><td class="mx-layer" style="background:#b91c1c;">-7</td><td>severe sadness, grief, serious conflict</td><td>breakup · job loss · long-buried secret first disclosed</td></tr>
+          <tr><td class="mx-layer" style="background:#ef4444;">-4</td><td>meaningful stress, disappointment</td><td>argument with boss · sleep deprivation · anxiety attack</td></tr>
+          <tr><td class="mx-layer" style="background:#fb923c;">-1</td><td>mild low, slight frustration</td><td>bad commute · minor annoyance</td></tr>
+          <tr><td class="mx-layer" style="background:#94a3b8;">0</td><td>pure neutral · rare (most shared things have some valence)</td><td>used sparingly</td></tr>
+          <tr><td class="mx-layer" style="background:#a3e635;">+1</td><td>mild pleasant</td><td>nice weather · good meal</td></tr>
+          <tr><td class="mx-layer" style="background:#22c55e;">+4</td><td>meaningful joy, satisfaction, connection</td><td>promotion at work · fun weekend · first real laugh in weeks</td></tr>
+          <tr><td class="mx-layer" style="background:#15803d;">+7</td><td>major positive milestone</td><td>engagement · big win · deep reconciliation</td></tr>
+          <tr><td class="mx-layer" style="background:#166534;">+10</td><td>life-defining joy</td><td>birth of child · surviving a crisis · long-awaited reunion</td></tr>
+        </table>
+      </div>
+      <div class="callout" style="margin-top:8px; border-left-color:#10b981;">
+        <strong>Why a signed scale:</strong> <code>|impact|</code> drives retrieval <em>salience</em>, but the <strong>sign</strong> drives the distinction between grief and joy. "用户妈妈去世了" is <code>-9</code> — storing it as <code>+9</code> would make it retrieve alongside joyful memories. The prompt explicitly warns against sign flips.
+      </div>
+
+      <h4 style="font-size:13px;color:#334155;margin:18px 0 6px;">Relational tag vocabulary (closed · exactly 6)</h4>
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <tr><th style="width:160px;">Tag</th><th>Triggers on</th><th style="width:280px;">Example</th></tr>
+          <tr><td><code>identity-bearing</code></td><td>a core fact about who the user is</td><td>"user is a single mom" · "user has depression"</td></tr>
+          <tr><td><code>unresolved</code></td><td>an emotional thread opened but not closed this session</td><td>user hints at fight but changes topic before resolution</td></tr>
+          <tr><td><code>vulnerability</code></td><td>a rare moment of being unusually open or exposed</td><td>"I've never told anyone this…"</td></tr>
+          <tr><td><code>turning-point</code></td><td>a shift in the relationship itself</td><td>first real trust · first conflict · first private share</td></tr>
+          <tr><td><code>correction</code></td><td>user corrected something the persona assumed</td><td>"实际上不是那样" · "actually that's not what I meant"</td></tr>
+          <tr><td><code>commitment</code></td><td>explicit promise or follow-up</td><td>"下次聊" · "I'll tell you how it goes"</td></tr>
+        </table>
+      </div>
+      <div class="callout" style="margin-top:8px; border-left-color:#10b981;">
+        <strong>Retrieval bonus hook:</strong> having <strong>any</strong> relational_tag grants a <code>+0.5</code> bonus to retrieval score (see §8). The prompt warns the LLM: "if you're tagging every event, you're over-tagging." Target ~20–30% of events should carry a relational tag.
+      </div>
+
+      <h4 style="font-size:13px;color:#334155;margin:18px 0 6px;">Mandatory self-check (the safety net)</h4>
+      <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:10px;">
+        The prompt requires the LLM, after drafting events, to ask itself: <em>"did this session contain any emotional PEAKS I failed to extract?"</em> Typical missed peaks listed in the prompt:
+      </p>
+      <ul style="font-size:12px;color:#475569;line-height:1.7;padding-left:20px;">
+        <li>a single casual mention of someone dying buried in mundane chat</li>
+        <li>a quick vulnerable disclosure followed by deflection</li>
+        <li>a question that is actually a cry for help ("你觉得活着累吗？")</li>
+        <li>understated positive milestones the user downplays ("btw, I got engaged")</li>
+      </ul>
+      <p style="font-size:12px;color:#475569;line-height:1.6;margin:10px 0 0;">
+        The <code>self_check_notes</code> output field records the LLM's answer. Missing a peak is the #1 reason the <strong>Emotional Peak Retention</strong> eval metric fails — so the prompt treats this as non-skippable.
+      </p>
+    </div>
+
+    <!-- L4 genesis · reflection -->
+    <div style="margin-bottom:12px; padding:18px 22px; background:#fff; border-radius:10px; border-left:5px solid #f59e0b;">
+      <h3 style="color:#92400e; margin:0 0 8px;">L4 · <code class="mono" style="font-size:13px;">concept_nodes</code> WHERE type=THOUGHT — reflection, not summary</h3>
+      <p style="font-size:12px;color:#475569;line-height:1.6;margin-bottom:10px;">
+        After extraction writes L3 events, if the session passes the reflection gate (see §7C), a MEDIUM-tier LLM runs <code>prompts.reflection.REFLECTION_SYSTEM_PROMPT</code>. It's told: <em>"you are the reflective inner voice · produce 1 or 2 quiet, honest impressions about what you have been noticing."</em>
+      </p>
+
+      <h4 style="font-size:13px;color:#334155;margin:14px 0 6px;">Tonal constraints (from the prompt · most important)</h4>
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <tr><th style="width:110px;">Rule</th><th>What's forbidden</th><th style="width:340px;">What's required instead</th></tr>
+          <tr><td><code>no clinical</code></td><td>"subject exhibits patterns of avoidance"</td><td>"something Alan does is…" · "Alan tends to…"</td></tr>
+          <tr><td><code>no advice</code></td><td>"Alan should talk to a professional"</td><td>impressions describe · they do not prescribe</td></tr>
+          <tr><td><code>no labels</code></td><td>"depression" · "anxiety disorder" · "PTSD"</td><td>describe what you observe without naming it</td></tr>
+          <tr><td><code>source language</code></td><td>translating Chinese events into English thoughts</td><td>match whatever language the events were in</td></tr>
+          <tr><td><code>no meta</code></td><td>"the session was 10 messages long" · "via Discord"</td><td>describe the user, not the conversation's metadata (F10 iron rule)</td></tr>
+        </table>
+      </div>
+
+      <h4 style="font-size:13px;color:#334155;margin:18px 0 6px;">Good vs bad reflections (from the prompt)</h4>
+      <div class="grid-2">
+        <div style="padding:12px 16px; background:#f0fdf4; border:1px solid #86efac; border-radius:8px;">
+          <div style="font-size:11px; font-weight:700; color:#065f46; margin-bottom:6px;">✅ Good</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#065f46; line-height:1.6;">"Alan 把真正重的话都留到深夜才说。白天的他稳定只是保护色。"</div>
+          <div style="margin-top:8px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#065f46; line-height:1.6;">"I've been noticing that Alan only lets himself be tired when no one is around to see it."</div>
+        </div>
+        <div style="padding:12px 16px; background:#fef2f2; border:1px solid #fca5a5; border-radius:8px;">
+          <div style="font-size:11px; font-weight:700; color:#991b1b; margin-bottom:6px;">❌ Bad</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#991b1b; line-height:1.6;">"Subject demonstrates nocturnal disclosure pattern suggestive of attachment avoidance."</div>
+          <div style="margin-top:8px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#991b1b; line-height:1.6;">"The user appears to be experiencing suppressed grief symptoms."</div>
+        </div>
+      </div>
+
+      <h4 style="font-size:13px;color:#334155;margin:18px 0 6px;">Structural constraints</h4>
+      <div class="activation">
+        <div class="act-head">Field</div>
+        <div class="act-head">Constraint</div>
+        <div class="act-head">Why</div>
+        <div class="act-head">Enforcement</div>
+        <div class="act-head">Parse behaviour on violation</div>
+
+        <div class="act-step" style="background:#f59e0b;">1</div>
+        <div class="act-what">count</div>
+        <div><strong>1 or 2 thoughts</strong>, never 0 (unless empty input), never 3+</div>
+        <div>most sessions produce 1 · a second only if genuinely distinct</div>
+        <div class="act-detail"><code>MAX_THOUGHTS = 2</code></div>
+        <div class="act-detail">truncate to 2; warn</div>
+
+        <div class="act-step" style="background:#f59e0b;">2</div>
+        <div class="act-what">description</div>
+        <div>1–3 sentences · natural warm observation · first person or neutral third</div>
+        <div>long rants → hard to read · short clinical labels → wrong tone</div>
+        <div class="act-detail">soft cap ~500, hard cap 2000</div>
+        <div class="act-detail">truncate at hard cap; warn</div>
+
+        <div class="act-step" style="background:#f59e0b;">3</div>
+        <div class="act-what">emotional_impact</div>
+        <div>signed [-10, +10] · but reflections rarely exceed ±8</div>
+        <div>impressions are processed · rarely touch raw extremes</div>
+        <div class="act-detail"><code>RECOMMENDED_IMPACT_BOUND = 8</code></div>
+        <div class="act-detail">warn at ±9/±10 · clamp to -10/+10</div>
+
+        <div class="act-step" style="background:#f59e0b;">4</div>
+        <div class="act-what">filling (evidence)</div>
+        <div><strong>MUST cite ≥1 L3 event id</strong> from the input · no invention allowed</div>
+        <div>without provenance, forgetting-rights cascade can't work</div>
+        <div class="act-detail">every id must exist in input</div>
+        <div class="act-detail">rejected · thought dropped</div>
+      </div>
+
+      <div class="callout" style="margin-top:12px; border-left-color:#f59e0b;">
+        <strong>The <code>filling</code> chain is load-bearing:</strong> it's what lets "forget this event" cascade correctly. If the user deletes an L3 event that five L4 thoughts cited, the system can either drop those thoughts (cascade) or mark their <code>filling</code> as orphaned (preserve thought, lose evidence). Without cited filling, neither option is possible — the chain is untraceable and the thought becomes a dangling insight. That's why the prompt treats missing <code>filling</code> as a <strong>rejection</strong> rather than a warning.
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:14px;">
+      <strong>Zoom-out:</strong> L1 is authored (by humans or bootstrap LLM). L2 is captured (verbatim, never distilled). L3 is the <em>first</em> place where raw text becomes memory — extracted by LLM per session close, with strict rules on valence sign and the 6 relational tags. L4 is the <em>inner voice</em> — fewer thoughts, softer tone, cited evidence. Each transition is an LLM call guarded by the gates in §7.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 2. ONE TURN IN MOTION ═══════════ -->
+<h2>2. One turn in motion <span class="h-sub">every layer, every second, chronological</span></h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">User types one sentence → persona streams one reply</div>
+      <div class="panel-sub">runtime.interaction.assemble_turn · called by TurnDispatcher from IncomingTurn.channel_id → channel.send() back</div>
+    </div>
+    <div class="tag tag-blue">HOT PATH</div>
+  </div>
+  <div class="panel-body">
+
+    <div class="activation">
+      <div class="act-head">#</div>
+      <div class="act-head">Who wakes up</div>
+      <div class="act-head">What it does</div>
+      <div class="act-head">Reads</div>
+      <div class="act-head">Writes / emits</div>
+
+      <div class="act-step">1</div>
+      <div class="act-what"><span class="dot d-ch"></span> Channel</div>
+      <div>Debounce burst into one <code class="mono">IncomingTurn</code>; mint a <code class="mono">turn_id</code>.</div>
+      <div class="act-detail act-read">internal: per-user debounce timer</div>
+      <div class="act-detail act-write">queue → TurnDispatcher</div>
+
+      <div class="act-step">2</div>
+      <div class="act-what"><span class="dot d-l2"></span> L2 write</div>
+      <div>Persist each raw user line as a <code class="mono">RecallMessage</code> row before the LLM sees anything.</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-write">L2 · <code>recall_messages</code>, FTS5 index, session <code>last_message_at</code></div>
+
+      <div class="act-step">3</div>
+      <div class="act-what"><span class="dot d-l1"></span> L1 read</div>
+      <div>Pull the 5 core blocks verbatim — persona / self / user / relationship / mood. Always first in the prompt.</div>
+      <div class="act-detail act-read">L1 · <code>core_blocks</code> (1 row per label)</div>
+      <div class="act-detail act-write">—</div>
+
+      <div class="act-step">4</div>
+      <div class="act-what"><span class="dot d-l3"></span><span class="dot d-l4"></span> L3+L4 retrieve</div>
+      <div>Embed the user's message · run vector search over L3+L4 concept_nodes · walk the relational graph for bonus scoring. <strong>No channel_id filter</strong> (iron rule D4).</div>
+      <div class="act-detail act-read">L3+L4 · <code>concept_nodes</code>, <code>concept_nodes_vec</code> (sqlite-vec ANN), <code>concept_node_filling</code> (graph edges)</div>
+      <div class="act-detail act-write">—</div>
+
+      <div class="act-step">5</div>
+      <div class="act-what"><span class="dot d-l2"></span> L2 read (window)</div>
+      <div>Load the last <code class="mono">memory.recent_window_size</code> messages from the <em>current session</em> as short-term chat context.</div>
+      <div class="act-detail act-read">L2 · <code>recall_messages</code> WHERE session_id = current, DESC LIMIT N</div>
+      <div class="act-detail act-write">—</div>
+
+      <div class="act-step">6</div>
+      <div class="act-what"><span class="dot d-prompt"></span> Prompt assemble</div>
+      <div>Splice system prompt + L1 blocks + retrieved L3/L4 memories + L2 window + new user message. <strong>No transport identity anywhere</strong> (iron rule F10).</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-write">ephemeral prompt string → LLM</div>
+
+      <div class="act-step">7</div>
+      <div class="act-what"><span class="dot d-prompt"></span> LLM stream</div>
+      <div>Call <code class="mono">llm.complete(prompt, stream=True)</code>; every token arrives via <code class="mono">on_token</code> callback.</div>
+      <div class="act-detail act-read">network: OpenAI / Anthropic / stub</div>
+      <div class="act-detail act-write">tokens → channel + SSE broadcaster</div>
+
+      <div class="act-step">8</div>
+      <div class="act-what"><span class="dot d-ch"></span> Channel send + mirror</div>
+      <div>Channel delivers the reply on its native surface (Discord DM / SSE frame). Runtime <em>also</em> mirrors to the runtime-owned broadcaster tagged with <code class="mono">source_channel_id</code>.</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-broad">SSE · user_appended, token×N, done, voice_ready</div>
+
+      <div class="act-step">9</div>
+      <div class="act-what"><span class="dot d-l2"></span> L2 write (persona)</div>
+      <div>Persist the persona's reply as its own <code class="mono">RecallMessage</code> row (role=persona). Same session_id, same turn_id.</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-write">L2 · <code>recall_messages</code>, FTS5 index, cost ledger</div>
+
+      <div class="act-step">10</div>
+      <div class="act-what"><span class="dot d-run"></span> on_turn_done</div>
+      <div>Clear the channel's <code class="mono">in_flight_turn_id</code>; log the LLM call into the cost ledger; hand control back to the dispatcher queue.</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-write"><code>llm_calls</code>; <code>chat.settings.updated</code> (if flags toggled)</div>
+    </div>
+
+    <div class="callout" style="margin-top:14px;">
+      <strong>Zoom-out:</strong> the <em>reply</em> to the user takes steps 1-8 (channel → memory → LLM → channel). Steps 9-10 are <strong>post-turn housekeeping</strong> — they happen while the user is reading the reply. This is why consolidation to L3/L4 is <em>not</em> here: it's asynchronous background work, covered in §3. <strong>Mood block is NOT auto-updated per turn in MVP</strong> — it only rewrites via admin edit or v1.0 reflection-driven path (see §6).
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 2. PARALLEL COLUMN SEQUENCE ═══════════ -->
+<h2>3. Same 10 steps, 8-column sequence <span class="h-sub">who is active when</span></h2>
+
+<div class="panel">
+  <div class="panel-body" style="padding: 10px 16px 16px;">
+    <div class="seq">
+      <div class="seq-col-head c-ch">Channel</div>
+      <div class="seq-col-head c-run">Runtime</div>
+      <div class="seq-col-head c-l1">L1</div>
+      <div class="seq-col-head c-l2">L2</div>
+      <div class="seq-col-head c-l3">L3</div>
+      <div class="seq-col-head c-l4">L4</div>
+      <div class="seq-col-head c-llm">LLM</div>
+      <div class="seq-col-head c-ui">UI</div>
+
+      <!-- step 1 -->
+      <div class="seq-cell active aCh">debounce</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 1 · Channel mints turn_id, emits <code>IncomingTurn</code></div>
+
+      <!-- step 2 -->
+      <div class="seq-cell active aCh">→ runtime</div>
+      <div class="seq-cell active aRun">ingest</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aL2">write</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aUI">user_appended</div>
+      <div class="seq-text">Step 2 · Runtime writes each <code>IncomingMessage</code> into L2. UI sees the user's bubble via SSE.</div>
+
+      <!-- step 3 -->
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aRun">assemble</div>
+      <div class="seq-cell active aL1">read 5 blocks</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 3 · L1 reads — persona / self / user / relationship / mood. Always first.</div>
+
+      <!-- step 4 -->
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aRun">retrieve</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aL3">vector search</div>
+      <div class="seq-cell active aL4">vector search</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 4 · L3+L4 retrieve via sqlite-vec + relational-graph walk. No channel_id filter (D4).</div>
+
+      <!-- step 5 -->
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aRun">recent window</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aL2">read N recent</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 5 · Pull <code>recent_window_size</code> L2 messages from current session.</div>
+
+      <!-- step 6 -->
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aRun">prompt</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 6 · Splice system prompt + L1 + retrieved L3/L4 + L2 window + new user line. F10 guard.</div>
+
+      <!-- step 7 -->
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aLLM">stream</div>
+      <div class="seq-cell active aUI">token×N</div>
+      <div class="seq-text">Step 7 · LLM streams tokens. Each token also mirrors to the runtime broadcaster (tag <code>source_channel_id</code>).</div>
+
+      <!-- step 8 -->
+      <div class="seq-cell active aCh">send</div>
+      <div class="seq-cell active aRun">mirror</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aUI">done</div>
+      <div class="seq-text">Step 8 · Originating channel delivers reply; runtime publishes <code>chat.message.done</code> to every SSE subscriber.</div>
+
+      <!-- step 9 -->
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aRun">persist persona</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell active aL2">write</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 9 · Write persona's reply to L2 with same session_id + turn_id.</div>
+
+      <!-- step 10 -->
+      <div class="seq-cell active aCh">on_turn_done</div>
+      <div class="seq-cell active aRun">log cost</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-cell">—</div>
+      <div class="seq-text">Step 10 · Dispatcher releases the slot; <code>llm_calls</code> ledger records tokens + cost. Mood block write is <strong>NOT</strong> per-turn in MVP — it only runs via admin edit or v1.0 reflection path.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 3. WHAT HAPPENS WHILE THE USER IS QUIET ═══════════ -->
+<h2>4. After you stop typing <span class="h-sub">session lifecycle &amp; consolidation — the slow write</span></h2>
+
+<div class="panel" style="border-color:#6ee7b7;background:linear-gradient(180deg,#f0fdf4 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Idle → session closes → memory graduates L2 → L3 → L4</div>
+      <div class="panel-sub">consolidate_worker + idle_scanner · background coroutines · user never waits on this</div>
+    </div>
+    <div class="tag tag-green">SLOW WRITE</div>
+  </div>
+  <div class="panel-body">
+
+    <!-- Timeline -->
+    <div class="tl-wrap">
+      <div class="tl-axis">
+        <div class="tl-event e-user" style="left:5%;">
+          <div class="tl-label">t = 0</div>
+          <div class="tl-sublabel">first user msg</div>
+        </div>
+        <div class="tl-event e-persona" style="left:10%;">
+          <div class="tl-label">+3s</div>
+          <div class="tl-sublabel">persona reply</div>
+        </div>
+        <div class="tl-event e-user" style="left:18%;">
+          <div class="tl-label">+15s</div>
+          <div class="tl-sublabel">user follow-up</div>
+        </div>
+        <div class="tl-event e-persona" style="left:25%;">
+          <div class="tl-label">+20s</div>
+          <div class="tl-sublabel">persona reply</div>
+        </div>
+        <div class="tl-event e-idle" style="left:50%;">
+          <div class="tl-label">+8 min</div>
+          <div class="tl-sublabel">user goes quiet</div>
+        </div>
+        <div class="tl-event e-close" style="left:80%;">
+          <div class="tl-label">+30 min</div>
+          <div class="tl-sublabel">idle_scanner closes session</div>
+        </div>
+        <div class="tl-event e-extract" style="left:88%;">
+          <div class="tl-label">+30m 5s</div>
+          <div class="tl-sublabel">L3 extraction</div>
+        </div>
+        <div class="tl-event e-reflect" style="left:96%;">
+          <div class="tl-label">+30m 20s</div>
+          <div class="tl-sublabel">L4 reflection</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Step-by-step · what runs, in order</h3>
+
+    <div class="activation">
+      <div class="act-head">When</div>
+      <div class="act-head">Worker</div>
+      <div class="act-head">What it does</div>
+      <div class="act-head">Reads</div>
+      <div class="act-head">Writes</div>
+
+      <div class="act-step" style="background:#94a3b8;">🌛</div>
+      <div class="act-what"><span class="dot d-run"></span> idle_scanner</div>
+      <div>Every <code class="mono">idle_scanner.interval_seconds</code> (default 60s) · finds sessions where <code class="mono">now - last_message_at &gt; SESSION_IDLE_MINUTES</code> (default 30min).</div>
+      <div class="act-detail act-read"><code>sessions</code> WHERE status='open'</div>
+      <div class="act-detail act-write"><code>sessions.status = 'closing'</code></div>
+
+      <div class="act-step" style="background:#10b981;">📦</div>
+      <div class="act-what"><span class="dot d-run"></span> consolidate_worker</div>
+      <div>Polls every <code class="mono">consolidate.worker_poll_seconds</code> (default 5s) for sessions in status='closing'. Picks one at a time.</div>
+      <div class="act-detail act-read"><code>sessions</code> WHERE status='closing'</div>
+      <div class="act-detail act-write"><code>sessions.status = 'consolidating'</code></div>
+
+      <div class="act-step" style="background:#10b981;">📝</div>
+      <div class="act-what"><span class="dot d-l2"></span> L2 read</div>
+      <div>Loads all <code class="mono">recall_messages</code> for the session. Skips entirely if &lt; <code class="mono">trivial_message_count</code> OR &lt; <code class="mono">trivial_token_count</code> (default 3 / 200).</div>
+      <div class="act-detail act-read">L2 · all messages in session</div>
+      <div class="act-detail act-write">—</div>
+
+      <div class="act-step" style="background:#10b981;">🧩</div>
+      <div class="act-what"><span class="dot d-prompt"></span> LLM extract</div>
+      <div>Calls <code class="mono">prompts.extract_fn(session_messages)</code> with SMALL tier model. Produces a short list of <code class="mono">ExtractedEvent(description, emotional_impact, tags...)</code>.</div>
+      <div class="act-detail act-read">L2 · session window</div>
+      <div class="act-detail act-write">LLM tokens → memory ingester</div>
+
+      <div class="act-step" style="background:#10b981;">💚</div>
+      <div class="act-what"><span class="dot d-l3"></span> L3 write</div>
+      <div>Each <code class="mono">ExtractedEvent</code> becomes a <code class="mono">concept_node</code> row (type=EVENT). Sentence-transformers embedder generates a 384-d vector; sqlite-vec stores it.</div>
+      <div class="act-detail act-read">L1 · self_block (for context)</div>
+      <div class="act-detail act-write">L3 · <code>concept_nodes</code>, <code>concept_nodes_vec</code>, <code>concept_nodes_fts</code></div>
+
+      <div class="act-step" style="background:#f59e0b;">🎯</div>
+      <div class="act-what"><span class="dot d-run"></span> reflection gate</div>
+      <div>Counts L4 thoughts written in last 24h. If ≥ <code class="mono">reflection_hard_gate_24h</code> (default 3) · <strong>skip reflection</strong>. Otherwise continue.</div>
+      <div class="act-detail act-read">L4 · COUNT(*) WHERE created_at &gt; now-24h</div>
+      <div class="act-detail">—</div>
+
+      <div class="act-step" style="background:#f59e0b;">🪞</div>
+      <div class="act-what"><span class="dot d-prompt"></span> LLM reflect</div>
+      <div>Calls <code class="mono">prompts.reflect_fn(recent_events)</code> with MEDIUM tier. Produces 0-2 <code class="mono">ExtractedThought(description, filling_ids)</code>.</div>
+      <div class="act-detail act-read">L3 · recent events (last N sessions)</div>
+      <div class="act-detail act-write">LLM tokens → memory ingester</div>
+
+      <div class="act-step" style="background:#f59e0b;">🧡</div>
+      <div class="act-what"><span class="dot d-l4"></span> L4 write</div>
+      <div>Each thought becomes a <code class="mono">concept_node</code> (type=THOUGHT) + one <code class="mono">concept_node_filling</code> row per source event (parent=thought, child=event).</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-write">L4 · <code>concept_nodes</code>, <code>concept_node_filling</code> (graph edges), <code>concept_nodes_vec</code></div>
+
+      <div class="act-step" style="background:#94a3b8;">✓</div>
+      <div class="act-what"><span class="dot d-run"></span> close</div>
+      <div>Marks session status='closed'. Fires <code class="mono">on_session_closed</code> hook → SSE <code class="mono">chat.session.boundary</code> event → Web UI draws a timestamped rule.</div>
+      <div class="act-detail act-read">—</div>
+      <div class="act-detail act-broad">SSE · chat.session.boundary</div>
+    </div>
+
+    <div class="callout">
+      <strong>Why this is async:</strong> extracting events needs an LLM call; reflecting needs another. If we did this inline per turn, every user message would wait 2-3 seconds for extraction before seeing the persona's reply. Instead, we let the reply hit the user immediately (steps 1-8 in §1) and push L3/L4 writing to the background (§3). The cost is: L3/L4 are stale by ~30 minutes of idle time. The benefit: the chat feels real-time.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 4. STORY TRACE ═══════════ -->
+<h2>5. Story trace <span class="h-sub">one real sentence, all four layers lit up</span></h2>
+
+<div class="story">
+  <h4>Scenario · user DMs the Discord bot</h4>
+  <div class="story-msg">"我养了只白猫,叫小黑。他超调皮,老在半夜跳到我脸上。"</div>
+
+  <div class="story-trace">
+    <div class="story-step">
+      <div class="ss-time">t+0.0s</div>
+      <div class="ss-badge b-ch">CH</div>
+      <div class="ss-text">discord.py <code>on_message</code> → DiscordChannel.push_user_message · debounce timer armed for 2s.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.0s</div>
+      <div class="ss-badge b-ch">CH</div>
+      <div class="ss-text">Debounce expires · mint <code>turn_id = turn-33bec7</code> · push IncomingTurn into queue.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.1s</div>
+      <div class="ss-badge b-l2">L2</div>
+      <div class="ss-text"><strong>Write ↘</strong> One row into <code>recall_messages</code> · role=user · content = the full sentence · channel_id="discord" · session_id="s_d4e82a" · linked to <code>turn-33bec7</code>.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.2s</div>
+      <div class="ss-badge b-l1">L1</div>
+      <div class="ss-text"><strong>Read ↗</strong> 5 core_blocks loaded · persona="她的性格是…" · user="你是一个在旧金山的软件工程师…" · mood="此刻平静" · etc.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.3s</div>
+      <div class="ss-badge b-l3">L3</div>
+      <div class="ss-text"><strong>Read ↗</strong> Embed the sentence · sqlite-vec ANN search · cold DB so 0 hits. Relational walk also 0 edges. No episodic memory to pull in yet.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.3s</div>
+      <div class="ss-badge b-l4">L4</div>
+      <div class="ss-text"><strong>Read ↗</strong> Same search on thoughts · 0 hits · persona has no long-term impressions about you yet.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.4s</div>
+      <div class="ss-badge b-llm">LLM</div>
+      <div class="ss-text">Prompt assembled (core_blocks + empty retrieval + empty window + new sentence) · sent to gpt-4o · streaming begins.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+2.4–5.8s</div>
+      <div class="ss-badge b-ch">CH</div>
+      <div class="ss-text">Tokens stream back · Discord channel builds the reply · Web broadcaster mirrors every token tagged <code>source_channel_id="discord"</code>.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+5.8s</div>
+      <div class="ss-badge b-l2">L2</div>
+      <div class="ss-text"><strong>Write ↘</strong> Persona reply written as second row · role=persona · same <code>turn_id</code>.</div>
+    </div>
+    <div class="story-step">
+      <div class="ss-time">t+5.9s</div>
+      <div class="ss-badge b-l1">L1</div>
+      <div class="ss-text"><strong>Write ↘</strong> mood_block refreshes to "带点笑意 · 对你家小动物的好奇" · broadcast as <code>chat.mood.update</code>.</div>
+    </div>
+
+    <!-- 30 minutes later -->
+    <div class="story-step" style="background:#f0fdf4;border-color:#6ee7b7;">
+      <div class="ss-time" style="color:#065f46;">t+31m</div>
+      <div class="ss-badge b-run">BG</div>
+      <div class="ss-text"><strong>idle_scanner tick</strong> · session s_d4e82a last_message_at is 31 min ago · mark status='closing'.</div>
+    </div>
+    <div class="story-step" style="background:#f0fdf4;border-color:#6ee7b7;">
+      <div class="ss-time" style="color:#065f46;">t+31m 5s</div>
+      <div class="ss-badge b-l3">L3</div>
+      <div class="ss-text"><strong>Write ↘</strong> Extract LLM produces: <code>{description: "user has a white cat named 小黑 that's energetic and jumps on them at night", emotional_impact: +2, tags: [pet, night]}</code> · stored with 384-d embedding. <strong>This is the moment 'persona remembers'.</strong></div>
+    </div>
+    <div class="story-step" style="background:#fffbeb;border-color:#fde047;">
+      <div class="ss-time" style="color:#92400e;">t+31m 20s</div>
+      <div class="ss-badge b-l4">L4</div>
+      <div class="ss-text"><strong>Gate check</strong> · 24h thought count = 0 &lt; 3 · <strong>OK to reflect</strong>. Reflection LLM produces: <code>{description: "user has a playful bond with animals · their life has warmth at night", filling_ids: [&lt;event_id&gt;]}</code>. Filling edge created thought → event.</div>
+    </div>
+
+    <!-- later, user asks 'you still there?' -->
+    <div class="story-step" style="background:#fff;">
+      <div class="ss-time">later</div>
+      <div class="ss-badge b-ch">CH</div>
+      <div class="ss-text">User returns, asks "你还记得我的猫吗" on <strong>Web</strong> (not Discord).</div>
+    </div>
+    <div class="story-step" style="background:#fff;">
+      <div class="ss-time">later</div>
+      <div class="ss-badge b-l3">L3</div>
+      <div class="ss-text"><strong>Read ↗</strong> Embed "你还记得我的猫吗" · sqlite-vec finds the 小黑 event with high cosine similarity. Persona mentions "小黑" by name. Cross-channel memory <em>works</em> — because D4 never filtered by channel_id.</div>
+    </div>
+  </div>
+
+  <div style="margin-top:14px;font-size:11px;color:#713f12;line-height:1.55;padding:10px 14px;background:#fff;border-radius:6px;border-left:3px solid #f59e0b;">
+    <strong>Key moments:</strong> the raw sentence lives in L2 immediately (step at +2.1s). But the fact "user has a cat named 小黑" only becomes <em>memory</em> at +31m when the session idle-closes and consolidation runs. Ask the persona at +10min and it won't know about 小黑 via L3 retrieval — it would only remember because the raw text is still in the L2 recent-window of the same session. Once the session closes and re-opens, L2 window is reset, but L3 now carries the permanent fact.
+  </div>
+</div>
+
+<!-- ═══════════ 5. READ/WRITE MATRIX ═══════════ -->
+<h2>6. Cross-layer read/write matrix <span class="h-sub">who touches each layer, when</span></h2>
+
+<div class="panel">
+  <div class="panel-body" style="padding-top:20px;">
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <tr>
+          <th>Layer</th>
+          <th>Turn hot path reads</th>
+          <th>Turn hot path writes</th>
+          <th>Background reads</th>
+          <th>Background writes</th>
+          <th>Admin API</th>
+        </tr>
+
+        <tr>
+          <td class="mx-layer l1">L1</td>
+          <td class="op-read">
+            <code>get_core_blocks()</code> · every prompt · all 5 labels
+          </td>
+          <td class="op-write">
+            <code>mood_block</code> refresh · post-turn observer
+          </td>
+          <td class="op-read">
+            extract_fn may read <code>self_block</code> for context
+          </td>
+          <td class="op-write">
+            reflect_fn may append to <code>self_block</code> via <code>append_to_core_block</code>
+          </td>
+          <td>
+            <ul>
+              <li>GET <code>/api/admin/persona</code></li>
+              <li>POST <code>/api/admin/persona</code></li>
+              <li>onboarding · bootstrap-from-material</li>
+            </ul>
+          </td>
+        </tr>
+
+        <tr>
+          <td class="mx-layer l2">L2</td>
+          <td class="op-read">
+            recent window · <code>recent_window_size</code> msgs
+          </td>
+          <td class="op-write">
+            every ingested message · user + persona
+          </td>
+          <td class="op-read">
+            whole-session read for extraction
+          </td>
+          <td class="op-write">
+            —
+          </td>
+          <td>
+            <ul>
+              <li>GET <code>/api/chat/history</code></li>
+              <li>GET <code>/api/admin/memory/search</code> (FTS)</li>
+              <li>DEL <code>/api/admin/memory/messages/{id}</code></li>
+              <li>DEL <code>/api/admin/memory/sessions/{id}</code></li>
+            </ul>
+          </td>
+        </tr>
+
+        <tr>
+          <td class="mx-layer l3">L3</td>
+          <td class="op-read">
+            vector + graph walk · every turn
+          </td>
+          <td class="op-write">
+            —
+          </td>
+          <td class="op-read">
+            reflect_fn reads recent events for input
+          </td>
+          <td class="op-write">
+            extract_fn output · per closed session
+          </td>
+          <td>
+            <ul>
+              <li>GET <code>/api/admin/memory/events</code> (paginated)</li>
+              <li>GET <code>/api/admin/memory/events/{id}/dependents</code></li>
+              <li>DEL <code>/api/admin/memory/events/{id}</code> (orphan or cascade)</li>
+              <li>import pipeline also writes L3</li>
+            </ul>
+          </td>
+        </tr>
+
+        <tr>
+          <td class="mx-layer l4">L4</td>
+          <td class="op-read">
+            vector search · every turn
+          </td>
+          <td class="op-write">
+            —
+          </td>
+          <td class="op-read">
+            gate reads 24h count
+          </td>
+          <td class="op-write">
+            reflect_fn output · 0-2 thoughts per session
+          </td>
+          <td>
+            <ul>
+              <li>GET <code>/api/admin/memory/thoughts</code></li>
+              <li>GET <code>/api/admin/memory/thoughts/{id}/trace</code></li>
+              <li>DEL <code>/api/admin/memory/thoughts/{id}</code></li>
+            </ul>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="callout" style="margin-top:14px;">
+      <strong>Observation:</strong> hot path (per-turn) is mostly <em>L1+L2+L3+L4 <strong>reads</strong></em>, with L2 writes as the only hot-path write. Everything that creates new memory (L3/L4) is <strong>background</strong>. This is by design — it's what keeps turn latency low while still building up long-term knowledge.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 6. MOOD FEEDBACK LOOP ═══════════ -->
+<h2>7. Mood feedback loop <span class="h-sub">how an admin edit or future reflection-driven update reaches the browser</span></h2>
+
+<div class="callout" style="margin-top:0; border-left-color:#f59e0b; background:#fffbeb;">
+  <strong>MVP note:</strong> the mood block is <em>not</em> auto-updated per turn today. It changes only when (a) admin UI edits it, (b) v1.0 reflection path writes it as a side-effect of L4 thought creation. The loop below describes the event-propagation path that <em>is</em> wired — it just isn't triggered per turn yet.
+</div>
+
+
+<div class="panel" style="border-color:#c4b5fd;background:linear-gradient(180deg,#f5f3ff 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">L1.mood_block → MoodObserver → SSE → Web UI header</div>
+      <div class="panel-sub">not a static field — a live signal · updated every turn</div>
+    </div>
+    <div class="tag tag-purple">LIVE</div>
+  </div>
+  <div class="panel-body">
+    <div class="loop">
+      <div class="loop-node trigger">
+        <div class="ln-name">1. Turn completes</div>
+        <div class="ln-desc">on_turn_done · step 10 of §1</div>
+      </div>
+      <div class="loop-arr">→</div>
+      <div class="loop-node observer">
+        <div class="ln-name">2. MoodObserver fires</div>
+        <div class="ln-desc">reads L2 recent window + previous L1.mood_block</div>
+      </div>
+      <div class="loop-arr">→</div>
+      <div class="loop-node trigger">
+        <div class="ln-name">3. Optional SMALL LLM</div>
+        <div class="ln-desc">summarises current emotional tone</div>
+      </div>
+
+      <div class="loop-arr down">↓</div>
+      <div class="loop-node" style="grid-column: 3 / 6; display:flex; align-items:center; gap:8px; justify-content:center; text-align:left;">
+        <div style="font-size:11px;color:#64748b;">Result funnels through <code style="font-family:'JetBrains Mono',monospace;background:#eef2ff;padding:1px 4px;border-radius:3px;">memory.update_mood_block()</code>.</div>
+      </div>
+
+      <div class="loop-node layer">
+        <div class="ln-name">4. L1 write</div>
+        <div class="ln-desc"><code style="font-family:'JetBrains Mono',monospace;font-size:10px;">core_blocks[mood].content</code> replaced + audit row appended to <code style="font-family:'JetBrains Mono',monospace;font-size:10px;">core_block_appends</code></div>
+      </div>
+      <div class="loop-arr">→</div>
+      <div class="loop-node channel">
+        <div class="ln-name">5. SSE broadcast</div>
+        <div class="ln-desc"><code style="font-family:'JetBrains Mono',monospace;font-size:10px;">chat.mood.update</code> · runtime-owned broadcaster · every subscriber</div>
+      </div>
+      <div class="loop-arr">→</div>
+      <div class="loop-node ui">
+        <div class="ln-name">6. Web UI re-renders</div>
+        <div class="ln-desc"><code style="font-family:'JetBrains Mono',monospace;font-size:10px;">usePersona</code> hook slices mood into <code style="font-family:'JetBrains Mono',monospace;font-size:10px;">persona.core_blocks.mood</code> · Chat header reacts</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Feedback becomes input:</strong> the <em>next</em> turn's Step 3 (L1 read) pulls whatever mood this loop wrote. So if the user's last message made the persona anxious, the next reply is generated in an anxious tone — memory and mood are closed-loop.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 7. EMOTION &amp; SCORING ALGORITHMS ═══════════ -->
+<h2>8. Emotion &amp; scoring algorithms <span class="h-sub">the math behind what gets remembered and what gets surfaced</span></h2>
+
+<div class="panel" style="border-color:#f9a8d4;background:linear-gradient(180deg,#fdf2f8 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Three distinct algorithms · three distinct jobs</div>
+      <div class="panel-sub">retrieval fusion score · consolidation trivial-gate · shock / timer / hard-gate reflection triggers</div>
+    </div>
+    <div class="tag tag-pink">MATH</div>
+  </div>
+  <div class="panel-body">
+
+    <!-- Retrieval fusion -->
+    <h3>Algorithm A · Retrieval fusion score</h3>
+    <p style="font-size:12px;color:#475569;line-height:1.6;margin:6px 0 12px;">
+      Every L3/L4 candidate returned from sqlite-vec ANN gets re-ranked by a weighted sum of 4 signals. The weights are in <code class="mono">src/echovessel/memory/retrieve.py</code>.
+    </p>
+
+    <div style="padding:16px 20px; background:#fff; border-radius:10px; border:1px solid #e2e8f0; margin:8px 0;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:13px; text-align:center; color:#334155; line-height:1.8;">
+        total = <span style="color:#0ea5e9;"><strong>0.5</strong> · recency</span> + <span style="color:#8b5cf6;"><strong>3.0</strong> · relevance</span> + <span style="color:#f59e0b;"><strong>2.0</strong> · |impact|</span> + <span style="color:#10b981;"><strong>1.0</strong> · relational_bonus</span>
+      </div>
+    </div>
+
+    <div class="activation">
+      <div class="act-head">Signal</div>
+      <div class="act-head">Weight</div>
+      <div class="act-head">Source</div>
+      <div class="act-head">Formula</div>
+      <div class="act-head">Range</div>
+
+      <div class="act-step" style="background:#0ea5e9;">R</div>
+      <div class="act-what">recency</div>
+      <div>how fresh this memory is</div>
+      <div class="act-detail">exp(-ln(2) · days_since / 14) · 14-day half-life</div>
+      <div class="act-detail">[0, 1]</div>
+
+      <div class="act-step" style="background:#8b5cf6;">V</div>
+      <div class="act-what">relevance</div>
+      <div>semantic similarity of query → candidate</div>
+      <div class="act-detail">1 - distance/2 · clamped · min-floor <code class="mono">0.4</code> drops orthogonal hits</div>
+      <div class="act-detail">[0, 1]</div>
+
+      <div class="act-step" style="background:#f59e0b;">I</div>
+      <div class="act-what">|impact|</div>
+      <div>how emotionally loaded the memory is</div>
+      <div class="act-detail">min(|emotional_impact| / 10, 1.0)</div>
+      <div class="act-detail">[0, 1]</div>
+
+      <div class="act-step" style="background:#10b981;">G</div>
+      <div class="act-what">relational_bonus</div>
+      <div>has the node got relational_tags?</div>
+      <div class="act-detail"><code class="mono">0.5</code> if relational_tags non-empty, else <code class="mono">0</code></div>
+      <div class="act-detail">{0, 0.5}</div>
+    </div>
+
+    <div class="callout">
+      <strong>Why these weights?</strong> Relevance (3.0) dominates — what a memory is <em>about</em> matters most. Impact (2.0) ensures peak emotional moments surface even when their semantics drift from the query. Recency (0.5) gently prefers fresh memories without drowning old-but-important ones. Relational bonus (1.0) pulls in graph-connected nodes. The <strong>min-relevance floor of 0.4</strong> is important: without it, strictly orthogonal candidates would occasionally bubble up on pure |impact| × relational_bonus, causing false-positive recall. With the floor, truly unrelated memories can't enter the ranked set even if they're emotionally loaded.
+    </div>
+
+    <!-- Strong emotion gate for consolidation -->
+    <h3 style="margin-top:28px;">Algorithm B · Strong-emotion override (consolidation)</h3>
+    <p style="font-size:12px;color:#475569;line-height:1.6;margin:6px 0 12px;">
+      When deciding whether a session is "trivial" (skip extraction), the session below threshold can still get promoted to L3 if it contains any <strong>strong-emotion keyword</strong>. This is a keyword-matched safety net for peak emotional moments that happen in short sessions.
+    </p>
+
+    <div class="activation">
+      <div class="act-head">Category</div>
+      <div class="act-head">zh keywords</div>
+      <div class="act-head">en keywords</div>
+      <div class="act-head">Why this list</div>
+      <div class="act-head">Effect</div>
+
+      <div class="act-step" style="background:#1e293b;">💧</div>
+      <div class="act-what">Bereavement / loss</div>
+      <div class="act-detail">走了 · 去世 · 死了 · 离世 · 葬礼 · 没了</div>
+      <div class="act-detail">died · passed away · funeral</div>
+      <div>loss events are almost always L3-worthy regardless of session length</div>
+      <div class="act-detail">override trivial gate</div>
+
+      <div class="act-step" style="background:#991b1b;">⚠️</div>
+      <div class="act-what">Crisis</div>
+      <div class="act-detail">撑不住 · 不想活 · 活不下去 · 自杀 · 崩溃</div>
+      <div class="act-detail">can't go on · suicide · breakdown</div>
+      <div>safety-critical · never silently dropped</div>
+      <div class="act-detail">override trivial gate</div>
+
+      <div class="act-step" style="background:#f59e0b;">🎭</div>
+      <div class="act-what">Major milestones</div>
+      <div class="act-detail">分手 · 离婚 · 被裁</div>
+      <div class="act-detail">breakup · divorce · fired</div>
+      <div>large identity shifts · persona should remember even from a one-liner</div>
+      <div class="act-detail">override trivial gate</div>
+    </div>
+
+    <div class="callout">
+      <strong>Logic:</strong> <code>is_trivial(session, messages)</code> returns <code>True</code> only when BOTH below-threshold AND no strong emotion keyword. <code>_has_strong_emotion(messages)</code> is a case-insensitive substring match — optimized for recall, not precision. False positives occasionally push a mundane sentence through extraction; that's an acceptable cost vs. losing a late-night single line about a breakup.
+    </div>
+
+    <!-- Shock / Timer / Hard gate -->
+    <h3 style="margin-top:28px;">Algorithm C · Reflection triggers (shock · timer · hard gate)</h3>
+    <p style="font-size:12px;color:#475569;line-height:1.6;margin:6px 0 12px;">
+      Once a session clears extraction (L3 events exist), the next question is whether to run reflection (L4 thoughts). Three decision rules converge.
+    </p>
+
+    <div class="gates">
+      <div class="gate-row">
+        <div class="gate-name">SHOCK_IMPACT_THRESHOLD</div>
+        <div class="gate-pass">≥</div>
+        <div class="gate-desc">If any freshly-extracted L3 event has <code class="mono">|emotional_impact| ≥ 8</code> · force reflection NOW even if the timer hasn't elapsed. Rationale: peak moments should reshape persona's impression immediately, not wait 24 hours.</div>
+        <div class="gate-src">SHOCK_IMPACT_THRESHOLD = 8<br>memory/consolidate.py</div>
+      </div>
+
+      <div class="gate-row">
+        <div class="gate-name">TIMER_REFLECTION_HOURS</div>
+        <div class="gate-pass">⏲</div>
+        <div class="gate-desc">Even without a shock event · if &gt; <code class="mono">24</code> hours have passed since the last reflection · run one. Keeps persona's long-term impressions slowly updating even during routine chats.</div>
+        <div class="gate-src">TIMER_REFLECTION_HOURS = 24<br>memory/consolidate.py</div>
+      </div>
+
+      <div class="gate-row">
+        <div class="gate-name">REFLECTION_HARD_LIMIT_24H</div>
+        <div class="gate-pass block">✕</div>
+        <div class="gate-desc">Regardless of shock or timer · no more than <code class="mono">3</code> reflections per rolling 24-hour window. Prevents L4 explosion on chatty days or debugging sessions. The hardest of the three gates — wins over shock and timer.</div>
+        <div class="gate-src">REFLECTION_HARD_LIMIT_24H = 3<br>(configurable via <code class="mono">consolidate.reflection_hard_gate_24h</code>)</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Decision order:</strong>
+      <br>
+      &nbsp;&nbsp;1. count reflections in last 24h → if ≥ 3, <strong>skip</strong> (hard gate wins)
+      <br>
+      &nbsp;&nbsp;2. any fresh event with <code>|impact| ≥ 8</code>? → reflect (shock path)
+      <br>
+      &nbsp;&nbsp;3. last reflection &gt; 24h ago? → reflect (timer path)
+      <br>
+      &nbsp;&nbsp;4. otherwise → skip this session
+    </div>
+
+    <!-- Impact score source -->
+    <h3 style="margin-top:28px;">Where does <code class="mono">emotional_impact</code> come from?</h3>
+    <p style="font-size:12px;color:#475569;line-height:1.6;margin:6px 0 12px;">
+      The <code>emotional_impact</code> signed integer on each L3 event isn't computed by a formula — it's <strong>produced by the extraction LLM</strong> itself. The prompt in <code>prompts/extract.py</code> instructs the model to rate <code>-10</code> (catastrophic loss / grief) to <code>+10</code> (peak joy / breakthrough), with <code>0</code> for mood-neutral facts. The algorithm layer here is the <em>prompt engineering</em> rather than a numerical rule, which is why tweaking it requires editing prompt text, not code.
+    </p>
+
+  </div>
+</div>
+
+<!-- ═══════════ 8. RETRIEVAL INTERNALS ═══════════ -->
+<h2>9. How retrieval actually ranks <span class="h-sub">inside the L3+L4 read of step 4</span></h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Ranked fusion · vector similarity + relational-graph bonus</div>
+      <div class="panel-sub">memory.retrieve() · lives in <code>src/echovessel/memory/retrieve.py</code></div>
+    </div>
+    <div class="tag tag-pink">DETAIL</div>
+  </div>
+  <div class="panel-body">
+    <div class="activation">
+      <div class="act-head">Phase</div>
+      <div class="act-head">Source</div>
+      <div class="act-head">What</div>
+      <div class="act-head">Formula / knob</div>
+      <div class="act-head">Result</div>
+
+      <div class="act-step">A</div>
+      <div class="act-what"><span class="dot d-prompt"></span> Query</div>
+      <div>Embed the new user message with sentence-transformers.</div>
+      <div class="act-detail">all-MiniLM-L6-v2 · 384-d</div>
+      <div class="act-detail">query vector q</div>
+
+      <div class="act-step">B</div>
+      <div class="act-what"><span class="dot d-l3"></span><span class="dot d-l4"></span> ANN search</div>
+      <div>sqlite-vec returns top-K nodes by cosine similarity.</div>
+      <div class="act-detail">K = <code>memory.retrieve_k</code> (default 10)</div>
+      <div class="act-detail">candidates[] with cos_sim</div>
+
+      <div class="act-step">C</div>
+      <div class="act-what"><span class="dot d-l3"></span> Graph walk</div>
+      <div>For each candidate, sum relational edges from <code>concept_node_filling</code> weighted by recency and type.</div>
+      <div class="act-detail">bonus = edges × <code>memory.relational_bonus_weight</code> (default 1.0)</div>
+      <div class="act-detail">candidates[] now have bonus</div>
+
+      <div class="act-step">D</div>
+      <div class="act-what"><span class="dot d-run"></span> Score</div>
+      <div>Final score = cos_sim + relational_bonus_weight · graph_bonus. Sort DESC.</div>
+      <div class="act-detail"><code>_score_node()</code> · pure function</div>
+      <div class="act-detail">ranked[] for prompt</div>
+
+      <div class="act-step">E</div>
+      <div class="act-what"><span class="dot d-prompt"></span> Trim</div>
+      <div>Cut to top N by prompt budget. Favour higher emotional_impact on ties.</div>
+      <div class="act-detail">prompt budget = remaining context tokens</div>
+      <div class="act-detail">selected[] attached to prompt</div>
+    </div>
+    <div class="callout">
+      <strong>Why the graph bonus?</strong> Vector similarity catches semantically-close memories but misses causal chains. "小黑 跳科目三" and "买了新的跳舞游戏" aren't semantically close, but they share a relational edge via the L4 thought "user likes playful things at home". The bonus pulls in graph-connected nodes even when cosine similarity alone wouldn't rank them.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 9. GATES ═══════════ -->
+<h2>10. Policy gates <span class="h-sub">the checks that can stop a write</span></h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Four gates guard memory writes &amp; proactive outputs</div>
+      <div class="panel-sub">each gate has a config knob and a test · fail-closed by design</div>
+    </div>
+    <div class="tag tag-red">GUARDS</div>
+  </div>
+  <div class="panel-body">
+    <div class="gates">
+      <div class="gate-row">
+        <div class="gate-name">trivial_session</div>
+        <div class="gate-pass block">✕</div>
+        <div class="gate-desc">Session's total messages &lt; <code class="mono">consolidate.trivial_message_count</code> OR tokens &lt; <code class="mono">consolidate.trivial_token_count</code> → skip extraction. Rationale: "hi / hey / how's it going" sessions don't earn a permanent L3 event.</div>
+        <div class="gate-src">memory.consolidate.is_trivial()</div>
+      </div>
+
+      <div class="gate-row">
+        <div class="gate-name">reflection_hard_gate_24h</div>
+        <div class="gate-pass block">✕</div>
+        <div class="gate-desc">Persona has already written ≥ <code class="mono">consolidate.reflection_hard_gate_24h</code> thoughts in last 24 hours → skip reflection for this session. Rationale: prevents L4 explosion on chatty days.</div>
+        <div class="gate-src">memory.consolidate.consolidate_session()</div>
+      </div>
+
+      <div class="gate-row">
+        <div class="gate-name">no_in_flight_turn</div>
+        <div class="gate-pass block">✕</div>
+        <div class="gate-desc">Proactive scheduler wants to send an autonomous message, but channel has <code class="mono">in_flight_turn_id</code> set → defer. Rationale: don't interrupt an active conversation.</div>
+        <div class="gate-src">proactive.policy.PolicyEngine</div>
+      </div>
+
+      <div class="gate-row">
+        <div class="gate-name">quiet_hours</div>
+        <div class="gate-pass block">✕</div>
+        <div class="gate-desc">Proactive attempts between <code class="mono">proactive.quiet_hours_start</code> and <code class="mono">quiet_hours_end</code> → drop. Respects user's sleep.</div>
+        <div class="gate-src">proactive.policy.quiet_hours_check()</div>
+      </div>
+
+      <div class="gate-row">
+        <div class="gate-name">rate_limit</div>
+        <div class="gate-pass block">✕</div>
+        <div class="gate-desc">Persona has already sent ≥ <code class="mono">proactive.max_per_24h</code> autonomous messages in last 24h → drop. Rationale: bound the dial.</div>
+        <div class="gate-src">proactive.policy.rate_limit_check()</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 10. SSE MIRROR AS NERVOUS SYSTEM ═══════════ -->
+<h2>11. SSE mirror as the nervous system <span class="h-sub">what events flow, in both directions</span></h2>
+
+<div class="panel" style="border-color:#f9a8d4;background:linear-gradient(180deg,#fdf2f8 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Runtime broadcaster carries both turn events and lifecycle events</div>
+      <div class="panel-sub">every SSE subscriber is a god-view observer</div>
+    </div>
+    <div class="tag tag-pink">NERVOUS SYSTEM</div>
+  </div>
+  <div class="panel-body">
+    <div class="activation">
+      <div class="act-head">Event</div>
+      <div class="act-head">Origin</div>
+      <div class="act-head">When it fires</div>
+      <div class="act-head">Carries</div>
+      <div class="act-head">UI reacts</div>
+
+      <div class="act-step" style="background:#6366f1;">◎</div>
+      <div class="act-what"><span class="dot d-ch"></span> chat.message.user_appended</div>
+      <div>New user message ingested (per message inside a turn)</div>
+      <div class="act-detail">user_id, content, turn_id, <em>source_channel_id</em></div>
+      <div class="act-detail">append user bubble to timeline</div>
+
+      <div class="act-step" style="background:#0ea5e9;">◎</div>
+      <div class="act-what"><span class="dot d-ch"></span> chat.message.token</div>
+      <div>LLM emits one streaming token</div>
+      <div class="act-detail">delta, turn_id, source_channel_id</div>
+      <div class="act-detail">concatenate into persona bubble</div>
+
+      <div class="act-step" style="background:#8b5cf6;">◎</div>
+      <div class="act-what"><span class="dot d-ch"></span> chat.message.done</div>
+      <div>Channel.send() succeeds, turn complete</div>
+      <div class="act-detail">content, delivery, source_channel_id</div>
+      <div class="act-detail">finalise bubble · render channel pill</div>
+
+      <div class="act-step" style="background:#f59e0b;">◎</div>
+      <div class="act-what"><span class="dot d-ch"></span> chat.message.voice_ready</div>
+      <div>TTS finishes, voice artifact cached</div>
+      <div class="act-detail">audio_url, duration</div>
+      <div class="act-detail">show ▶ voice play button</div>
+
+      <div class="act-step" style="background:#6366f1;">◎</div>
+      <div class="act-what"><span class="dot d-l1"></span> chat.mood.update</div>
+      <div>L1.mood_block refreshed (after turn)</div>
+      <div class="act-detail">mood_summary text</div>
+      <div class="act-detail">re-render chat header mood</div>
+
+      <div class="act-step" style="background:#10b981;">◎</div>
+      <div class="act-what"><span class="dot d-run"></span> chat.session.boundary</div>
+      <div>Session transitions open → closed</div>
+      <div class="act-detail">closed_session_id, new_session_id, timestamp</div>
+      <div class="act-detail">insert timestamped horizontal rule</div>
+
+      <div class="act-step" style="background:#94a3b8;">◎</div>
+      <div class="act-what"><span class="dot d-run"></span> chat.settings.updated</div>
+      <div>voice_enabled / provider / etc flipped (e.g. SIGHUP)</div>
+      <div class="act-detail">changed_fields</div>
+      <div class="act-detail">cross-tab config sync</div>
+
+      <div class="act-step" style="background:#a855f7;">◎</div>
+      <div class="act-what"><span class="dot d-run"></span> chat.connection.ready</div>
+      <div>SSE handshake complete</div>
+      <div class="act-detail">—</div>
+      <div class="act-detail">green dot in status pill</div>
+
+      <div class="act-step" style="background:#94a3b8;">◎</div>
+      <div class="act-what"><span class="dot d-run"></span> chat.connection.heartbeat</div>
+      <div>Every 30s · NAT keepalive</div>
+      <div class="act-detail">—</div>
+      <div class="act-detail">no visual</div>
+    </div>
+  </div>
+</div>
+
+<div class="callout" style="margin-top:40px;">
+  <strong>Companion:</strong> the static-view equivalent of this page is <a href="./architecture.html"><code>architecture.html</code></a> — layout, tables, endpoints, iron rules. If <em>this</em> page is the nervous system, <em>that</em> one is the anatomy.
+</div>
+
+</body>
+</html>

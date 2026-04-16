@@ -24,6 +24,12 @@ echovessel run          # 首次启动会自动打开 http://localhost:7777/
 
 ## 架构一览
 
+> 🗺 **完整一页架构图**:[`../architecture.html`](../architecture.html) —— 浏览器打开,一页拿到模块分层、Memory L1-L4 架构、消息流程、跨 channel SSE mirror、完整 HTTP 接口清单、铁律、发布时间线。
+>
+> 🧠 **记忆系统最简图**:[`../memory/layers.html`](../memory/layers.html) —— 一张 SVG · 4 层 · 如何连接 · write / distill / read 三种模式 · 附 Stanford Generative Agents 打分公式的致敬说明。
+>
+> 🔄 **运行时流程 / "记忆层如何被唤醒"**:[`../architecture-flow.html`](../architecture-flow.html) —— 配套页 · 聚焦单次 turn 的逐步唤醒、8 列 sequence 图、真实故事 trace("我养了只猫叫小黑")、检索排序、policy 门禁、SSE 神经系统事件。
+
 ```
 ┌───────────────────────────────────────────────────────┐
 │                    RUNTIME(daemon)                    │

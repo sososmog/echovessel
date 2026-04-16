@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EchoVessel — Internal Architecture Deep Dive</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #fafbfc;
+    color: #1a1a2e;
+    padding: 60px 40px;
+    min-width: 1200px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  h1 span { color: #94a3b8; font-weight: 400; }
+  h2 { font-size: 20px; font-weight: 700; margin: 40px 0 16px; letter-spacing: -0.3px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 20px 0 10px; color: #334155; }
+
+  .header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 12px; padding-bottom: 16px; border-bottom: 2px solid #e2e8f0;
+  }
+  .meta { font-size: 12px; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Channels bar ── */
+  .modes-bar {
+    display: flex; gap: 12px; padding: 18px 0 24px;
+    border-bottom: 1px solid #f1f5f9; margin-bottom: 32px;
+  }
+  .mode-card {
+    flex: 1; padding: 14px 18px; border-radius: 10px;
+    border: 1.5px solid #e2e8f0; background: #fff;
+  }
+  .mode-card.active { border-color: #3b82f6; background: #eff6ff; }
+  .mode-card.future { border-style: dashed; opacity: 0.7; }
+  .mode-card .mode-name { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+  .mode-card .mode-desc { font-size: 11px; color: #64748b; }
+
+  /* ── Panels ── */
+  .panel {
+    border: 1.5px solid #e2e8f0; border-radius: 14px;
+    background: #fff; overflow: hidden; margin-bottom: 24px;
+  }
+  .panel-head {
+    padding: 16px 24px 12px; display: flex;
+    justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .panel-title { font-size: 16px; font-weight: 700; }
+  .panel-sub { font-size: 11px; color: #64748b; font-family: 'JetBrains Mono', monospace; }
+  .tag {
+    font-size: 9px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 12px;
+  }
+  .tag-blue { background: #dbeafe; color: #1e40af; }
+  .tag-green { background: #d1fae5; color: #065f46; }
+  .tag-amber { background: #fef3c7; color: #92400e; }
+  .tag-purple { background: #ede9fe; color: #5b21b6; }
+  .tag-pink { background: #fce7f3; color: #9d174d; }
+  .tag-red { background: #fee2e2; color: #991b1b; }
+  .panel-body { padding: 16px 24px 20px; }
+
+  /* ── Flow steps ── */
+  .flow { display: flex; gap: 0; align-items: stretch; flex-wrap: wrap; margin: 8px 0; }
+  .flow-step {
+    flex: 1; min-width: 130px; padding: 12px 14px;
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  }
+  .flow-step .fs-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #3b82f6; color: white; font-size: 10px; font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .flow-step .fs-name { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+  .flow-step .fs-desc { font-size: 10px; color: #64748b; line-height: 1.4; }
+  .flow-step.highlight { background: #eef2ff; border-color: #818cf8; }
+  .flow-arr { display: flex; align-items: center; padding: 0 4px; color: #93c5fd; font-size: 16px; font-weight: 700; }
+
+  /* ── Grids ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+
+  /* ── Cards ── */
+  .card {
+    border: 1.5px solid #e2e8f0; border-radius: 10px;
+    background: #fff; overflow: hidden;
+  }
+  .card-head {
+    padding: 12px 16px 8px; font-weight: 700; font-size: 13px;
+    border-bottom: 1px solid #f1f5f9;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .card-body { padding: 10px 16px 14px; }
+  .card.c-blue { border-color: #93c5fd; background: linear-gradient(180deg, #eff6ff 0%, #fff 30%); }
+  .card.c-green { border-color: #6ee7b7; background: linear-gradient(180deg, #f0fdf4 0%, #fff 30%); }
+  .card.c-amber { border-color: #fcd34d; background: linear-gradient(180deg, #fffbeb 0%, #fff 30%); }
+  .card.c-purple { border-color: #c4b5fd; background: linear-gradient(180deg, #f5f3ff 0%, #fff 30%); }
+  .card.c-pink { border-color: #f9a8d4; background: linear-gradient(180deg, #fdf2f8 0%, #fff 30%); }
+  .card.c-red { border-color: #fca5a5; background: linear-gradient(180deg, #fef2f2 0%, #fff 30%); }
+  .card.c-slate { border-color: #94a3b8; background: linear-gradient(180deg, #f8fafc 0%, #fff 30%); }
+
+  /* ── Items ── */
+  .item {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 5px 0; border-bottom: 1px solid #f8fafc;
+  }
+  .item:last-child { border: none; }
+  .item .i-name { font-weight: 500; font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #334155; }
+  .item .i-desc { font-size: 11px; color: #94a3b8; text-align: right; max-width: 60%; }
+
+  /* ── Layer stack (for module architecture) ── */
+  .layer-stack { display: flex; flex-direction: column; gap: 8px; }
+  .layer {
+    padding: 14px 20px; border-radius: 10px;
+    border: 1.5px solid #e2e8f0; background: #fff;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .layer .l-name { font-weight: 700; font-size: 13px; }
+  .layer .l-mods {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .layer .l-mod {
+    font-size: 11px; font-family: 'JetBrains Mono', monospace;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .layer .l-rule { font-size: 10px; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+  .layer.l-top { background: #eff6ff; border-color: #93c5fd; }
+  .layer.l-mid1 { background: #f5f3ff; border-color: #c4b5fd; }
+  .layer.l-mid2 { background: #fdf2f8; border-color: #f9a8d4; }
+  .layer.l-base { background: #f8fafc; border-color: #94a3b8; }
+  .layer .l-name-sub { font-size: 10px; color: #64748b; font-weight: 400; margin-top: 2px; }
+  .layer .l-text-left { flex: 1; }
+
+  /* ── Memory layers (L1-L4) ── */
+  .mem-stack { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .mem-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 1.2fr 1fr;
+    gap: 16px; align-items: stretch;
+    padding: 14px; border-radius: 10px;
+    border: 1.5px solid #e2e8f0; background: #fff;
+  }
+  .mem-row .m-level {
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 20px; letter-spacing: -0.5px;
+    border-radius: 8px; color: white;
+  }
+  .mem-row .m-level.lv1 { background: #6366f1; }
+  .mem-row .m-level.lv2 { background: #0ea5e9; }
+  .mem-row .m-level.lv3 { background: #10b981; }
+  .mem-row .m-level.lv4 { background: #f59e0b; }
+  .mem-row .m-name { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+  .mem-row .m-tagline { font-size: 11px; color: #64748b; line-height: 1.4; margin-bottom: 6px; }
+  .mem-row .m-table {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    color: #475569;
+  }
+  .mem-row .m-content { font-size: 11px; color: #334155; line-height: 1.4; }
+  .mem-row .m-content ul {
+    list-style: none; padding: 0; margin: 0;
+  }
+  .mem-row .m-content li {
+    padding: 2px 0 2px 12px; position: relative; font-size: 11px;
+  }
+  .mem-row .m-content li::before {
+    content: '•'; position: absolute; left: 0; color: #94a3b8;
+  }
+  .mem-row .m-kind {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 11px;
+  }
+  .mem-row .m-kind-lbl {
+    font-size: 9px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #94a3b8; margin-bottom: 2px;
+  }
+
+  /* ── Tool pills ── */
+  .tool-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    padding: 3px 8px; border-radius: 4px; border: 1px solid;
+  }
+  .pill-file { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+  .pill-shell { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+  .pill-gui { background: #f5f3ff; border-color: #ddd6fe; color: #5b21b6; }
+  .pill-net { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+  .pill-other { background: #f8fafc; border-color: #e2e8f0; color: #475569; }
+  .pill-amber { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+
+  /* ── HTTP endpoints ── */
+  .endpoint-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .ep {
+    padding: 7px 10px; border: 1px solid #f1f5f9; border-radius: 6px;
+    font-size: 11px; background: #f8fafc;
+  }
+  .ep .ep-method {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 9px; margin-right: 4px; padding: 1px 5px; border-radius: 3px;
+  }
+  .ep-method.m-get { background: #dcfce7; color: #15803d; }
+  .ep-method.m-post { background: #dbeafe; color: #1e40af; }
+  .ep-method.m-delete { background: #fee2e2; color: #991b1b; }
+  .ep-method.m-patch { background: #fef3c7; color: #92400e; }
+  .ep .ep-path { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #334155; }
+  .ep .ep-desc { font-size: 10px; color: #64748b; display: block; margin-top: 2px; }
+
+  /* ── Table ── */
+  .ws-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+  .ws-table th {
+    text-align: left; font-size: 10px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; color: #94a3b8;
+    padding: 6px 10px; border-bottom: 2px solid #e2e8f0;
+  }
+  .ws-table td {
+    padding: 6px 10px; font-size: 11px; border-bottom: 1px solid #f1f5f9;
+  }
+  .ws-table code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; background: #f1f5f9; padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* ── Section divider ── */
+  .divider {
+    border-top: 2px solid #e2e8f0; margin: 40px 0 8px;
+    padding-top: 8px;
+  }
+
+  /* ── Iron rules ── */
+  .iron-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .iron {
+    border: 1.5px solid #fca5a5; border-radius: 10px;
+    background: linear-gradient(180deg, #fef2f2 0%, #fff 40%);
+    padding: 12px 16px;
+  }
+  .iron .ir-head {
+    font-weight: 700; font-size: 13px; color: #991b1b;
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 4px;
+  }
+  .iron .ir-id {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    background: #fee2e2; color: #991b1b;
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .iron .ir-body { font-size: 11px; color: #475569; line-height: 1.5; }
+  .iron .ir-guard { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: #64748b; margin-top: 4px; }
+
+  /* ── Callouts ── */
+  .callout {
+    font-size: 11px; color: #64748b; margin-top: 12px;
+    padding: 10px 14px; background: #f8fafc; border-radius: 6px;
+    border-left: 3px solid #93c5fd;
+  }
+  .callout strong { color: #1e40af; }
+  .callout code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #eff6ff; padding: 1px 5px; border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<div class="header">
+  <h1>EchoVessel <span>Internal Architecture Deep Dive</span></h1>
+  <div class="meta">v0.0.1-alpha · 2026.04 · main @ 852fb62 · 916 tests green</div>
+</div>
+
+<!-- ═══════════ CHANNELS BAR ═══════════ -->
+<div class="modes-bar">
+  <div class="mode-card active">
+    <div class="mode-name">Web channel</div>
+    <div class="mode-desc">FastAPI + SSE · 127.0.0.1:7777 · React + Vite UI · God-view observer of every other channel</div>
+  </div>
+  <div class="mode-card active">
+    <div class="mode-name">Discord DM channel</div>
+    <div class="mode-desc">discord.py bot · per-user DM · native OGG Opus voice messages via ffmpeg</div>
+  </div>
+  <div class="mode-card future">
+    <div class="mode-name">iMessage channel</div>
+    <div class="mode-desc">spec stub only · will drop into runtime mirror with zero frontend change</div>
+  </div>
+  <div class="mode-card future">
+    <div class="mode-name">WeChat channel</div>
+    <div class="mode-desc">placeholder · deferred to v0.1.0+</div>
+  </div>
+</div>
+
+<!-- What's current -->
+<div class="panel" style="border-color:#6ee7b7;background:linear-gradient(180deg,#f0fdf4 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Current baseline · v0.0.1-alpha</div>
+      <div class="panel-sub">14 commits from initial snapshot to main · 916 passed / 3 skipped / 0 failed</div>
+    </div>
+    <div class="tag tag-green">SHIPPED</div>
+  </div>
+  <div class="panel-body">
+    <div class="grid-4">
+      <div class="item"><span class="i-name">echovessel run</span><span class="i-desc">daemon · SIGTERM/SIGHUP · pidfile</span></div>
+      <div class="item"><span class="i-name">memory.db</span><span class="i-desc">SQLite + FTS5 + sqlite-vec</span></div>
+      <div class="item"><span class="i-name">LLM providers</span><span class="i-desc">openai_compat / anthropic / stub</span></div>
+      <div class="item"><span class="i-name">FishAudio TTS</span><span class="i-desc">per-persona voice_id · MP3 cache</span></div>
+      <div class="item"><span class="i-name">Web admin page</span><span class="i-desc">6 tabs · zero placeholders</span></div>
+      <div class="item"><span class="i-name">Import pipeline</span><span class="i-desc">upload → LLM extract → memory</span></div>
+      <div class="item"><span class="i-name">Proactive scheduler</span><span class="i-desc">opt-in · 4 policy gates</span></div>
+      <div class="item"><span class="i-name">Cross-channel SSE</span><span class="i-desc">runtime-owned broadcaster</span></div>
+      <div class="item"><span class="i-name">Chat history backfill</span><span class="i-desc">GET /api/chat/history</span></div>
+      <div class="item"><span class="i-name">Voice clone wizard</span><span class="i-desc">3-step FishAudio clone</span></div>
+      <div class="item"><span class="i-name">Cost tracking</span><span class="i-desc">llm_calls ledger · per-feature</span></div>
+      <div class="item"><span class="i-name">GitHub Actions CI</span><span class="i-desc">ruff · lint-imports · pytest</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 1. MODULES ═══════════ -->
+<h2>1. Module Layers — the layered architecture</h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Five modules · strict downward-only imports</div>
+      <div class="panel-sub">Enforced by import-linter · 2 contracts · 0 broken</div>
+    </div>
+    <div class="tag tag-purple">LAYERED</div>
+  </div>
+  <div class="panel-body">
+    <div class="layer-stack">
+      <div class="layer l-top">
+        <div class="l-text-left">
+          <div class="l-name">runtime</div>
+          <div class="l-name-sub">daemon loop · turn dispatcher · LLM factory · SIGHUP reload · import facade · cost logger</div>
+        </div>
+        <div class="l-mods">
+          <span class="l-mod pill-file">app.py</span>
+          <span class="l-mod pill-file">launcher.py</span>
+          <span class="l-mod pill-file">interaction.py</span>
+          <span class="l-mod pill-file">consolidate_worker.py</span>
+        </div>
+      </div>
+      <div class="layer l-mid1">
+        <div class="l-text-left">
+          <div class="l-name">channels &nbsp;·&nbsp; proactive</div>
+          <div class="l-name-sub">channels translate external protocols ↔ IncomingTurn · proactive schedules autonomous messages</div>
+        </div>
+        <div class="l-rule">can import ↓ memory · voice · core</div>
+      </div>
+      <div class="layer l-mid2">
+        <div class="l-text-left">
+          <div class="l-name">memory &nbsp;·&nbsp; voice</div>
+          <div class="l-name-sub">memory = L1-L4 persistence + retrieve + consolidate · voice = TTS/STT/cloning provider layer</div>
+        </div>
+        <div class="l-rule">can import ↓ core</div>
+      </div>
+      <div class="layer l-base">
+        <div class="l-text-left">
+          <div class="l-name">core</div>
+          <div class="l-name-sub">shared types · enums · config paths · utilities · zero external dependencies</div>
+        </div>
+        <div class="l-rule">no upward imports</div>
+      </div>
+    </div>
+    <div class="callout">
+      <strong>Contract enforcement:</strong> <code>uv run lint-imports</code> fails CI if any module imports upward. The second contract (<code>proactive must not import runtime or prompts</code>) prevents a subtle cycle where proactive scheduling would transitively pull in the LLM factory.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 2. MEMORY (EMPHASIZED) ═══════════ -->
+<h2>2. Memory — the four-layer store</h2>
+
+<div class="panel" style="border-color:#c4b5fd;background:linear-gradient(180deg,#f5f3ff 0%,#fff 30%);">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">L1 → L4 · raw transcripts to reflected insights</div>
+      <div class="panel-sub">One SQLite file · all layers share it · never sharded by channel_id (iron rule D4)</div>
+    </div>
+    <div class="tag tag-purple">CORE</div>
+  </div>
+  <div class="panel-body">
+    <div class="mem-stack">
+
+      <!-- L1 -->
+      <div class="mem-row">
+        <div class="m-level lv1">L1</div>
+        <div>
+          <div class="m-name">Core blocks — the persona's frame</div>
+          <div class="m-tagline">The 5 hand-editable identity documents that every LLM prompt starts with.</div>
+          <div class="m-table">table · <code>core_blocks</code> &nbsp; audit · <code>core_block_appends</code></div>
+        </div>
+        <div class="m-content">
+          <ul>
+            <li><code>persona_block</code> — who this persona is (trait, tone, values)</li>
+            <li><code>self_block</code> — persona's self-narrative (grows by reflection)</li>
+            <li><code>user_block</code> — identity-level facts about you</li>
+            <li><code>relationship_block</code> — people in your life as persona sees them</li>
+            <li><code>mood_block</code> — transient · auto-refreshed each turn</li>
+          </ul>
+        </div>
+        <div class="m-kind">
+          <div class="m-kind-lbl">write path</div>
+          <div>onboarding · admin edit · importer bootstrap · mood observer</div>
+          <div class="m-kind-lbl" style="margin-top:6px;">read path</div>
+          <div>every turn's prompt prefix</div>
+        </div>
+      </div>
+
+      <!-- L2 -->
+      <div class="mem-row">
+        <div class="m-level lv2">L2</div>
+        <div>
+          <div class="m-name">Recall messages — raw chat log</div>
+          <div class="m-tagline">Every user + persona message, verbatim, tagged with channel + turn + session.</div>
+          <div class="m-table">table · <code>recall_messages</code> &nbsp; fts · <code>recall_messages_fts</code></div>
+        </div>
+        <div class="m-content">
+          <ul>
+            <li><code>role: "user" | "persona"</code></li>
+            <li><code>channel_id</code> stored, but <strong>never read as filter</strong> (D4)</li>
+            <li><code>session_id</code> groups a conversation burst</li>
+            <li><code>turn_id</code> groups one user→persona exchange</li>
+            <li>FTS5 trigram index for search + LIKE fallback for short queries</li>
+          </ul>
+        </div>
+        <div class="m-kind">
+          <div class="m-kind-lbl">write path</div>
+          <div><code>memory.ingest_message()</code> · per message · atomic</div>
+          <div class="m-kind-lbl" style="margin-top:6px;">read path</div>
+          <div><code>/api/chat/history</code> · recent-window context · admin memory search</div>
+        </div>
+      </div>
+
+      <!-- L3 -->
+      <div class="mem-row">
+        <div class="m-level lv3">L3</div>
+        <div>
+          <div class="m-name">Events — episodic memory</div>
+          <div class="m-tagline">"What happened" distilled out of chat · one concrete event per node.</div>
+          <div class="m-table">table · <code>concept_nodes</code> WHERE type=EVENT &nbsp; vec · <code>concept_nodes_vec</code></div>
+        </div>
+        <div class="m-content">
+          <ul>
+            <li><code>description</code> — short 1-2 sentence summary</li>
+            <li><code>emotional_impact</code> — signed integer, drives retrieval weighting</li>
+            <li><code>emotion_tags</code> / <code>relational_tags</code> — JSON lists</li>
+            <li>sentence-transformers embedding (384-d) written via sqlite-vec</li>
+            <li>linked back to source session/turn (<code>source_session_id</code>, <code>imported_from</code>)</li>
+          </ul>
+        </div>
+        <div class="m-kind">
+          <div class="m-kind-lbl">write path</div>
+          <div>consolidate worker (post session close) · import pipeline</div>
+          <div class="m-kind-lbl" style="margin-top:6px;">read path</div>
+          <div>vector search + relational graph walk · every turn's retrieval step</div>
+        </div>
+      </div>
+
+      <!-- L4 -->
+      <div class="mem-row">
+        <div class="m-level lv4">L4</div>
+        <div>
+          <div class="m-name">Thoughts — long-term impressions</div>
+          <div class="m-tagline">"What persona believes about you" · reflection over multiple L3 events.</div>
+          <div class="m-table">table · <code>concept_nodes</code> WHERE type=THOUGHT &nbsp; link · <code>concept_node_filling</code></div>
+        </div>
+        <div class="m-content">
+          <ul>
+            <li><code>description</code> — one durable insight ("you find quiet afternoons grounding")</li>
+            <li><code>concept_node_filling</code> · parent=thought, child=event · the evidence chain</li>
+            <li>reflection hard-gate · max 3 new thoughts / 24h per persona (configurable)</li>
+            <li>skipped entirely for trivial sessions (&lt; 3 messages or &lt; 200 tokens)</li>
+            <li>also embedded in sqlite-vec for semantic recall</li>
+          </ul>
+        </div>
+        <div class="m-kind">
+          <div class="m-kind-lbl">write path</div>
+          <div>consolidate worker <code>reflect_fn</code> · LLM call</div>
+          <div class="m-kind-lbl" style="margin-top:6px;">read path</div>
+          <div>retrieval · delete → shows source events to confirm cascade</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout">
+      <strong>Consolidate pipeline:</strong> session closes (idle ≥ 30 min OR max length) → worker picks it up → extracts L3 events from L2 messages (stub LLM for trivial cases, SMALL tier otherwise) → runs L4 reflection if the reflection gate allows → writes to <code>concept_nodes</code> with embeddings via sqlite-vec. Four tuning knobs (<code>trivial_message_count</code>, <code>trivial_token_count</code>, <code>reflection_hard_gate_24h</code>, <code>memory.relational_bonus_weight</code>) are live via <code>config.toml</code>.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 3. MESSAGE FLOW ═══════════ -->
+<h2>3. Message Flow — one turn end-to-end</h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Discord DM → Persona reply, with cross-channel mirror to Web</div>
+      <div class="panel-sub">runtime._handle_turn_body orchestrates every step</div>
+    </div>
+    <div class="tag tag-blue">HOT PATH</div>
+  </div>
+  <div class="panel-body">
+    <div class="flow">
+      <div class="flow-step">
+        <div class="fs-num">1</div>
+        <div class="fs-name">Receive</div>
+        <div class="fs-desc">discord.py on_message · DiscordChannel.push_user_message</div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-step">
+        <div class="fs-num">2</div>
+        <div class="fs-name">Debounce</div>
+        <div class="fs-desc">2 s timer per user · burst → one IncomingTurn</div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-step">
+        <div class="fs-num">3</div>
+        <div class="fs-name">Dispatch</div>
+        <div class="fs-desc">TurnDispatcher · serial queue across all channels</div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-step highlight">
+        <div class="fs-num">4</div>
+        <div class="fs-name">Assemble</div>
+        <div class="fs-desc">ingest L2 · retrieve L3/L4 · prompt · LLM stream</div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-step">
+        <div class="fs-num">5</div>
+        <div class="fs-name">Send</div>
+        <div class="fs-desc">Discord DM · + optional TTS voice message</div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-step">
+        <div class="fs-num">6</div>
+        <div class="fs-name">Mirror</div>
+        <div class="fs-desc">SSE broadcast · source_channel_id="discord"</div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-step">
+        <div class="fs-num">7</div>
+        <div class="fs-name">on_turn_done</div>
+        <div class="fs-desc">clear in-flight · cost log · consolidate eligible?</div>
+      </div>
+    </div>
+    <div class="callout">
+      <strong>Step 4 expanded:</strong> <code>runtime.interaction.assemble_turn()</code> performs 5 sub-steps per turn — ingest each message into L2, run <code>retrieve()</code> (no channel_id filter!), assemble prompt from core_blocks + retrieved L3/L4, call <code>llm.complete()</code> with streaming tokens, and ingest the assistant's reply into L2 once streaming finishes.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 4. CROSS-CHANNEL SSE ═══════════ -->
+<h2>4. Cross-Channel SSE — Web as god-view</h2>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Runtime-owned broadcaster</div>
+        <div class="panel-sub">Promoted from WebChannel in commit 54f69d2</div>
+      </div>
+      <div class="tag tag-green">LIVE SYNC</div>
+    </div>
+    <div class="panel-body">
+      <div class="card c-green">
+        <div class="card-head">🌐 SSEBroadcaster owned by Runtime</div>
+        <div class="card-body" style="font-size:11px;color:#475569;line-height:1.5;">
+          Every channel's turn events mirror through one shared broadcaster. Every payload carries <code style="font-family:'JetBrains Mono',monospace;background:#f0fdf4;padding:1px 4px;border-radius:3px;">source_channel_id</code>. Web UI renders a channel pill (📱 Discord / 💬 iMessage). Failure-isolated: if publish raises, the originating channel's <code style="font-family:'JetBrains Mono',monospace;background:#f0fdf4;padding:1px 4px;border-radius:3px;">send()</code> still succeeds.
+        </div>
+      </div>
+      <h3>Mirrored events</h3>
+      <div class="tool-pills">
+        <span class="pill pill-net">chat.message.user_appended</span>
+        <span class="pill pill-net">chat.message.token</span>
+        <span class="pill pill-net">chat.message.done</span>
+        <span class="pill pill-net">chat.message.voice_ready</span>
+        <span class="pill pill-gui">chat.mood.update</span>
+        <span class="pill pill-gui">chat.session.boundary</span>
+        <span class="pill pill-gui">chat.settings.updated</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">History backfill</div>
+        <div class="panel-sub">GET /api/chat/history</div>
+      </div>
+      <div class="tag tag-blue">PAST</div>
+    </div>
+    <div class="panel-body">
+      <div class="card c-blue">
+        <div class="card-head">↑ useChat mount · 50 newest, DESC</div>
+        <div class="card-body" style="font-size:11px;color:#475569;line-height:1.5;">
+          On every browser mount, <code style="font-family:'JetBrains Mono',monospace;background:#eff6ff;padding:1px 4px;border-radius:3px;">useChat</code> calls <code style="font-family:'JetBrains Mono',monospace;background:#eff6ff;padding:1px 4px;border-radius:3px;">getChatHistory(50)</code>, reverses to ascending, prepends into the timeline, and only then starts the SSE stream. Cursor paging via <code style="font-family:'JetBrains Mono',monospace;background:#eff6ff;padding:1px 4px;border-radius:3px;">before=&lt;turn_id&gt;</code> walks further back. "Load older" button prepends more.
+        </div>
+      </div>
+      <h3>Query params</h3>
+      <table class="ws-table">
+        <tr><th>Param</th><th>Semantics</th></tr>
+        <tr><td><code>limit</code></td><td>1–200, default 50 · clamped 422 on overflow</td></tr>
+        <tr><td><code>before</code></td><td>turn_id cursor · returns messages older than that turn's first message · 404 if cursor unknown</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 5. HTTP API ═══════════ -->
+<h2>5. HTTP Surface — <code style="font-family:'JetBrains Mono',monospace;">127.0.0.1:7777</code></h2>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Chat</div>
+      <div class="tag tag-blue">WEB CHANNEL</div>
+    </div>
+    <div class="panel-body">
+      <div class="endpoint-grid">
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/chat/send</span><span class="ep-desc">user message · ingests + dispatches</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/chat/events</span><span class="ep-desc">SSE stream · runtime-owned broadcaster</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/chat/history</span><span class="ep-desc">backfill · cross-channel</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/chat/voice/{id}.mp3</span><span class="ep-desc">cached TTS audio</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Admin · state &amp; persona</div>
+      <div class="tag tag-purple">RUNTIME</div>
+    </div>
+    <div class="panel-body">
+      <div class="endpoint-grid">
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/state</span><span class="ep-desc">daemon + channel readiness + memory counts</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/persona</span><span class="ep-desc">5 core blocks</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/persona</span><span class="ep-desc">partial update · atomic TOML write</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/persona/onboarding</span><span class="ep-desc">first-run bootstrap</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/persona/voice-toggle</span><span class="ep-desc">flip persona.voice_enabled</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/persona/bootstrap-from-material</span><span class="ep-desc">LLM-synthesise blocks from import</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Admin · memory</div>
+      <div class="tag tag-pink">L3/L4</div>
+    </div>
+    <div class="panel-body">
+      <div class="endpoint-grid">
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/memory/events</span><span class="ep-desc">L3 list · pagination</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/memory/thoughts</span><span class="ep-desc">L4 list · pagination</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/memory/search</span><span class="ep-desc">FTS5 + LIKE fallback · highlights</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/memory/preview-delete</span><span class="ep-desc">cascade preview</span></div>
+        <div class="ep"><span class="ep-method m-delete">DEL</span><span class="ep-path">/api/admin/memory/events/{id}</span><span class="ep-desc">orphan or cascade choice</span></div>
+        <div class="ep"><span class="ep-method m-delete">DEL</span><span class="ep-path">/api/admin/memory/thoughts/{id}</span><span class="ep-desc">soft delete</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/memory/events/{id}/dependents</span><span class="ep-desc">which thoughts derive from this?</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/memory/thoughts/{id}/trace</span><span class="ep-desc">which events fed this?</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Admin · import &amp; voice</div>
+      <div class="tag tag-amber">PIPELINES</div>
+    </div>
+    <div class="panel-body">
+      <div class="endpoint-grid">
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/import/upload</span><span class="ep-desc">multipart file</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/import/upload_text</span><span class="ep-desc">paste text</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/import/estimate</span><span class="ep-desc">tokens + USD</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/import/start</span><span class="ep-desc">spawn pipeline · returns pipeline_id</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/import/cancel</span><span class="ep-desc">idempotent</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/import/events</span><span class="ep-desc">SSE per pipeline</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/voice/samples</span><span class="ep-desc">upload training clip</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/voice/clone</span><span class="ep-desc">FishAudio interactive clone</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/voice/preview</span><span class="ep-desc">streaming audio/mpeg</span></div>
+        <div class="ep"><span class="ep-method m-post">POST</span><span class="ep-path">/api/admin/voice/activate</span><span class="ep-desc">write voice_id to config</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Admin · config &amp; cost</div>
+      <div class="tag tag-amber">KNOBS</div>
+    </div>
+    <div class="panel-body">
+      <div class="endpoint-grid">
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/config</span><span class="ep-desc">safe subset · api_key_present, never value</span></div>
+        <div class="ep"><span class="ep-method m-patch">PATCH</span><span class="ep-path">/api/admin/config</span><span class="ep-desc">atomic write + SIGHUP reload</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/cost/summary</span><span class="ep-desc">today / 7d / 30d · by feature</span></div>
+        <div class="ep"><span class="ep-method m-get">GET</span><span class="ep-path">/api/admin/cost/recent</span><span class="ep-desc">last 50 LLM calls</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Admin · forget (cascade)</div>
+      <div class="tag tag-red">DESTRUCTIVE</div>
+    </div>
+    <div class="panel-body">
+      <div class="endpoint-grid">
+        <div class="ep"><span class="ep-method m-delete">DEL</span><span class="ep-path">/api/admin/memory/messages/{id}</span><span class="ep-desc">mark L3 source_deleted</span></div>
+        <div class="ep"><span class="ep-method m-delete">DEL</span><span class="ep-path">/api/admin/memory/sessions/{id}</span><span class="ep-desc">cascade messages</span></div>
+        <div class="ep"><span class="ep-method m-delete">DEL</span><span class="ep-path">/api/admin/memory/core-blocks/{label}/appends/{id}</span><span class="ep-desc">physical audit-row delete</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 6. VOICE ═══════════ -->
+<h2>6. Voice — TTS · STT · clone</h2>
+
+<div class="grid-3">
+  <div class="card c-amber">
+    <div class="card-head">🎙️ TTS · FishAudio</div>
+    <div class="card-body">
+      <div class="item"><span class="i-name">per-persona voice_id</span><span class="i-desc">set in [persona] config</span></div>
+      <div class="item"><span class="i-name">MP3 cache</span><span class="i-desc">{data_dir}/voice_cache/ · content-hashed</span></div>
+      <div class="item"><span class="i-name">Web delivery</span><span class="i-desc">&lt;audio&gt; tag via /api/chat/voice/{id}.mp3</span></div>
+      <div class="item"><span class="i-name">Discord delivery</span><span class="i-desc">native OGG Opus bubble via ffmpeg transcode</span></div>
+    </div>
+  </div>
+
+  <div class="card c-purple">
+    <div class="card-head">✨ Clone wizard</div>
+    <div class="card-body">
+      <div class="item"><span class="i-name">minimum samples</span><span class="i-desc">3 audio clips, 10-30 s each</span></div>
+      <div class="item"><span class="i-name">sample store</span><span class="i-desc">{data_dir}/voice_samples/{sample_id}/</span></div>
+      <div class="item"><span class="i-name">clone_voice_interactive()</span><span class="i-desc">VoiceService · FishAudio SDK</span></div>
+      <div class="item"><span class="i-name">activate</span><span class="i-desc">atomic write persona.voice_id to config.toml</span></div>
+    </div>
+  </div>
+
+  <div class="card c-slate">
+    <div class="card-head">📝 STT (scaffold)</div>
+    <div class="card-body">
+      <div class="item"><span class="i-name">WhisperAPIProvider</span><span class="i-desc">implemented, no HTTP route yet</span></div>
+      <div class="item"><span class="i-name">StubVoiceProvider</span><span class="i-desc">tests · eval harness</span></div>
+      <div class="item"><span class="i-name">LocalWhisperProvider</span><span class="i-desc">deferred to v1.0</span></div>
+      <div class="item"><span class="i-name">voice upload path</span><span class="i-desc">not wired into chat yet</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 7. RUNTIME INTERNALS ═══════════ -->
+<h2>7. Runtime Internals — turn dispatcher &amp; workers</h2>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">TurnDispatcher</div>
+      <div class="tag tag-blue">SERIAL</div>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:12px;color:#475569;line-height:1.6;">
+        One queue, one worker coroutine, one turn at a time — across <em>all</em> channels. Web sends and Discord DMs compete for the same slot. This is the contract that lets memory writes and LLM calls assume no concurrent mutation. Parallel turns are ordered by arrival at the dispatcher, not by channel.
+      </div>
+      <div class="callout">
+        <strong>Why not one-per-channel?</strong> Because the persona has one brain. Parallel LLM calls would produce interleaved memory writes and mood updates. We picked simplicity over throughput.
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Background workers</div>
+      <div class="tag tag-green">IDLE</div>
+    </div>
+    <div class="panel-body">
+      <div class="item"><span class="i-name">consolidate_worker</span><span class="i-desc">polls closed sessions · runs extract + reflect</span></div>
+      <div class="item"><span class="i-name">idle_scanner</span><span class="i-desc">every 60 s · closes sessions idle &gt; 30 min</span></div>
+      <div class="item"><span class="i-name">SSE heartbeat</span><span class="i-desc">30 s · keeps NAT connections alive</span></div>
+      <div class="item"><span class="i-name">proactive scheduler</span><span class="i-desc">opt-in · 4 gate policy</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 8. CONFIG & SECRETS ═══════════ -->
+<h2>8. Config &amp; Secrets</h2>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><code style="font-family:'JetBrains Mono',monospace;font-size:14px;">~/.echovessel/config.toml</code></div>
+      <div class="tag tag-amber">KNOBS</div>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:12px;color:#475569;line-height:1.6;">
+        Authored by <code style="font-family:'JetBrains Mono',monospace;">echovessel init</code> from <code style="font-family:'JetBrains Mono',monospace;">resources/config.toml.sample</code>. Sections: <code style="font-family:'JetBrains Mono',monospace;">[runtime]</code>, <code style="font-family:'JetBrains Mono',monospace;">[persona]</code>, <code style="font-family:'JetBrains Mono',monospace;">[memory]</code>, <code style="font-family:'JetBrains Mono',monospace;">[llm]</code>, <code style="font-family:'JetBrains Mono',monospace;">[consolidate]</code>, <code style="font-family:'JetBrains Mono',monospace;">[idle_scanner]</code>, <code style="font-family:'JetBrains Mono',monospace;">[voice]</code>, <code style="font-family:'JetBrains Mono',monospace;">[proactive]</code>, <code style="font-family:'JetBrains Mono',monospace;">[channels.web]</code>, <code style="font-family:'JetBrains Mono',monospace;">[channels.discord]</code>. Hot-reload set: LLM provider/model/params, persona display_name, memory tuning, consolidate thresholds. Restart-required set: data_dir, db_path.
+      </div>
+      <h3>Hot reload via SIGHUP</h3>
+      <div class="tool-pills">
+        <span class="pill pill-other">llm.provider</span>
+        <span class="pill pill-other">llm.model</span>
+        <span class="pill pill-other">llm.temperature</span>
+        <span class="pill pill-other">persona.display_name</span>
+        <span class="pill pill-other">persona.voice_id</span>
+        <span class="pill pill-other">memory.retrieve_k</span>
+        <span class="pill pill-other">consolidate.*</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title"><code style="font-family:'JetBrains Mono',monospace;font-size:14px;">./.env</code> (CWD)</div>
+      <div class="tag tag-red">SECRETS</div>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:12px;color:#475569;line-height:1.6;">
+        Loaded by <code style="font-family:'JetBrains Mono',monospace;">_load_dotenv()</code> at <code style="font-family:'JetBrains Mono',monospace;">echovessel run</code> startup from <code style="font-family:'JetBrains Mono',monospace;">Path.cwd() / ".env"</code>. Shell-exported env vars take precedence. <code style="font-family:'JetBrains Mono',monospace;">echovessel init</code> writes a commented-out template at <code style="font-family:'JetBrains Mono',monospace;">chmod 0600</code> and <strong>never overwrites</strong> an existing <code style="font-family:'JetBrains Mono',monospace;">.env</code> (not even with <code style="font-family:'JetBrains Mono',monospace;">--force</code>). The committed template is <code style="font-family:'JetBrains Mono',monospace;">.env.example</code>.
+      </div>
+      <h3>Expected keys</h3>
+      <div class="tool-pills">
+        <span class="pill pill-shell">OPENAI_API_KEY</span>
+        <span class="pill pill-shell">ANTHROPIC_API_KEY</span>
+        <span class="pill pill-shell">FISH_AUDIO_KEY</span>
+        <span class="pill pill-shell">ECHOVESSEL_DISCORD_TOKEN</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 9. IRON RULES ═══════════ -->
+<h2>9. Iron Rules — the invariants that never bend</h2>
+
+<div class="iron-grid">
+  <div class="iron">
+    <div class="ir-head"><span class="ir-id">D4</span> Memory is never sharded by channel_id</div>
+    <div class="ir-body"><code>retrieve()</code>, search, consolidate — none of them take a <code>channel_id</code> filter. The persona is one identity; memory is one store. Discord and Web share everything.</div>
+    <div class="ir-guard">guard · tests/runtime/test_memory_facade.py · tests/integration/test_cross_channel_unified_persona.py</div>
+  </div>
+  <div class="iron">
+    <div class="ir-head"><span class="ir-id">F10</span> No transport identity in LLM prompts</div>
+    <div class="ir-body">The prompt that goes into the LLM never mentions "this came from Discord". The persona does not know which surface you're on — keeping it agnostic means memory is portable across channels.</div>
+    <div class="ir-guard">guard · tests/runtime/test_f10_no_channel_in_prompt.py</div>
+  </div>
+  <div class="iron">
+    <div class="ir-head"><span class="ir-id">L0</span> Layered downward imports only</div>
+    <div class="ir-body">runtime → channels/proactive → memory/voice → core. Nothing imports upward. Enforced mechanically.</div>
+    <div class="ir-guard">guard · uv run lint-imports · 2 contracts kept</div>
+  </div>
+  <div class="iron">
+    <div class="ir-head"><span class="ir-id">Z0</span> Zero regression baseline</div>
+    <div class="ir-body">Every wave must keep all prior tests green. Baseline walks upward: 665 → 678 → 724 → 754 → ... → 916. Tests are never deleted to make CI pass.</div>
+    <div class="ir-guard">guard · pytest in GitHub Actions · blocks merge on red</div>
+  </div>
+  <div class="iron">
+    <div class="ir-head"><span class="ir-id">S1</span> One turn at a time</div>
+    <div class="ir-body">TurnDispatcher serializes across every channel. Web and Discord cannot run parallel turns. One persona = one brain = one LLM call at a time.</div>
+    <div class="ir-guard">guard · tests/runtime/test_turn_dispatcher.py</div>
+  </div>
+  <div class="iron">
+    <div class="ir-head"><span class="ir-id">B1</span> Broadcast failure must not break a channel</div>
+    <div class="ir-body">Cross-channel SSE mirror is fire-and-forget. If the broadcaster raises, the originating channel's <code>send()</code> still succeeds. Observability never breaks delivery.</div>
+    <div class="ir-guard">guard · tests/runtime/test_cross_channel_sse.py</div>
+  </div>
+</div>
+
+<!-- ═══════════ 10. CI & PACKAGING ═══════════ -->
+<h2>10. CI &amp; Packaging</h2>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">GitHub Actions</div>
+      <div class="tag tag-green">ENFORCED</div>
+    </div>
+    <div class="panel-body">
+      <div class="item"><span class="i-name">ruff check</span><span class="i-desc">src/ + tests/ · ubuntu + macos matrix</span></div>
+      <div class="item"><span class="i-name">lint-imports</span><span class="i-desc">2 contracts · layered + proactive-no-runtime</span></div>
+      <div class="item"><span class="i-name">pytest -q</span><span class="i-desc">916 passed · 3 skipped · 0 failed</span></div>
+      <div class="item"><span class="i-name">triggers</span><span class="i-desc">push to main + every PR · concurrency group</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">hatch_build.py</div>
+      <div class="tag tag-blue">WHEEL</div>
+    </div>
+    <div class="panel-body">
+      <div class="item"><span class="i-name">uv build</span><span class="i-desc">re-runs npm run build + vite · embeds /static/</span></div>
+      <div class="item"><span class="i-name">wheel contents</span><span class="i-desc">src/echovessel/ + resources/ + static bundle</span></div>
+      <div class="item"><span class="i-name">artifact size</span><span class="i-desc">~415 KB wheel · ~365 KB sdist</span></div>
+      <div class="item"><span class="i-name">PyPI</span><span class="i-desc">not yet published · run from source via git clone</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 11. RELEASE TIMELINE ═══════════ -->
+<h2>11. Release Timeline</h2>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">14 commits · initial snapshot → current main</div>
+      <div class="panel-sub">2026-04-15 → 2026-04-16 · ~24 wall-clock hours</div>
+    </div>
+    <div class="tag tag-purple">JOURNEY</div>
+  </div>
+  <div class="panel-body">
+    <table class="ws-table">
+      <tr><th>Commit</th><th>Scope</th></tr>
+      <tr><td><code>4357250</code></td><td>Initial snapshot — EchoVessel pre-v0.0.1</td></tr>
+      <tr><td><code>7325498</code></td><td>Round 1 truth-layer landing — 4 config fields wired through, <code>runtime/proactive.py</code> dead stub removed, SSE pruning</td></tr>
+      <tr><td><code>ed7fe4a</code></td><td>Round 2 · Import pipeline wired end-to-end — facade + 5 admin routes + 3-step wizard</td></tr>
+      <tr><td><code>1959fe3</code></td><td>Wave A · Admin UI truth-layer — Events/Thoughts/forget/mood/session boundary/Discord status</td></tr>
+      <tr><td><code>8006185</code></td><td>Wave B · Cost tracking + Config edit</td></tr>
+      <tr><td><code>36fe8b8</code></td><td>Wave C · Memory search / trace / onboarding path 2 / voice clone</td></tr>
+      <tr><td><code>85e39f9</code></td><td>Housekeeping · SQLite lock fix · FastAPI 422 rename</td></tr>
+      <tr><td><code>d9c6ba3</code></td><td>CI fix · skip eval tests when corpus missing · loosen facade timeout</td></tr>
+      <tr><td><code>f67bc07</code></td><td>echovessel init writes .env template</td></tr>
+      <tr><td><code>49bf995</code></td><td>Move .env to repo-root (CWD) + add .env.example</td></tr>
+      <tr><td><code>3535406</code></td><td>Scrub remaining ~/.echovessel/.env refs in docs</td></tr>
+      <tr><td><code>6e1d3af</code></td><td>README/CHANGELOG · drop PyPI-install framing (not released yet)</td></tr>
+      <tr><td><code>54f69d2</code></td><td>Cross-channel unified Web timeline (live SSE + history backfill)</td></tr>
+      <tr><td><code>6e3a7a1</code></td><td>Fix cost_logger table creation + CHANGELOG truth sweep</td></tr>
+      <tr><td><code>a8fc089</code></td><td>Public docs · cross-channel + truth sweep</td></tr>
+      <tr><td><code>852fb62</code></td><td>docs/channels: naming note (channel == stateful message gateway)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="callout" style="margin-top:40px;">
+  <strong>Where this doc lives:</strong> <code>docs/architecture.html</code> in the EchoVessel repo. Linked from <code>docs/README.md</code> and both language landing pages. Re-generate by editing this file directly — it's hand-written HTML, not compiled from markdown.
+</div>
+
+</body>
+</html>

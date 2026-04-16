@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EchoVessel Memory — Four Layers, One Picture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #fafbfc;
+    color: #1a1a2e;
+    padding: 60px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  h1 {
+    font-size: 28px; font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+  h1 span { color: #94a3b8; font-weight: 400; }
+  .subtitle {
+    font-size: 13px; color: #64748b;
+  }
+
+  .diagram-wrap {
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 40px 20px;
+    margin-bottom: 40px;
+  }
+
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 32px;
+  }
+  .leg-item {
+    padding: 14px 16px;
+    border-radius: 10px;
+    border-left: 4px solid;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+  }
+  .leg-item.l1 { border-left-color: #6366f1; }
+  .leg-item.l2 { border-left-color: #0ea5e9; }
+  .leg-item.l3 { border-left-color: #10b981; }
+  .leg-item.l4 { border-left-color: #f59e0b; }
+  .leg-item h3 {
+    font-size: 13px; font-weight: 700; margin-bottom: 4px;
+  }
+  .leg-item h3 .lv {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700;
+    padding: 1px 6px; border-radius: 3px;
+    margin-right: 6px;
+    color: #fff;
+  }
+  .leg-item.l1 .lv { background: #6366f1; }
+  .leg-item.l2 .lv { background: #0ea5e9; }
+  .leg-item.l3 .lv { background: #10b981; }
+  .leg-item.l4 .lv { background: #f59e0b; }
+  .leg-item .sub {
+    font-size: 11px; color: #64748b;
+    line-height: 1.55; margin-top: 4px;
+  }
+  .leg-item code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #f1f5f9;
+    padding: 1px 5px; border-radius: 3px;
+    font-size: 10px;
+  }
+
+  .triple {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 40px;
+  }
+  .mode {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .mode h3 {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .mode h3 .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px; border-radius: 4px;
+    color: #fff;
+  }
+  .mode.write h3 .pill { background: #b45309; }
+  .mode.distill h3 .pill { background: #7c3aed; }
+  .mode.read h3 .pill { background: #0f766e; }
+  .mode p {
+    font-size: 11px; color: #475569;
+    line-height: 1.6;
+  }
+  .mode code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #f1f5f9;
+    padding: 1px 5px; border-radius: 3px;
+    font-size: 10px;
+  }
+
+  .footer {
+    margin-top: 40px;
+    text-align: center;
+    font-size: 11px;
+    color: #94a3b8;
+  }
+  .footer a {
+    color: #1e40af;
+    text-decoration: none;
+    margin: 0 8px;
+  }
+  .footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>EchoVessel Memory <span>· Four Layers, One Picture</span></h1>
+  <div class="subtitle">The simplest possible view of how L1–L4 connect.</div>
+</header>
+
+<!-- ─── Diagram ─── -->
+<div class="diagram-wrap">
+<svg viewBox="0 0 1000 720" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto;">
+  <defs>
+    <!-- arrow markers -->
+    <marker id="arr-write" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arr-distill" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arr-read" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e"/>
+    </marker>
+    <marker id="arr-filling" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <!-- Top row: conversation -->
+  <g>
+    <rect x="40" y="24" width="200" height="50" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="140" y="47" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#334155">user · 用户输入</text>
+    <text x="140" y="62" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" fill="#64748b">"我养了只猫,叫小黑"</text>
+
+    <rect x="760" y="24" width="200" height="50" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="860" y="47" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#334155">persona · 回复</text>
+    <text x="860" y="62" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" fill="#64748b">"小黑听起来很可爱呢"</text>
+  </g>
+
+  <!-- Center: LLM prompt -->
+  <g>
+    <rect x="380" y="280" width="240" height="80" rx="10" fill="#f5f3ff" stroke="#a855f7" stroke-width="1.5"/>
+    <text x="500" y="308" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#5b21b6">LLM prompt</text>
+    <text x="500" y="326" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#6b21a8">assemble_turn()</text>
+    <text x="500" y="345" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" fill="#7c3aed">streaming reply → channel</text>
+  </g>
+
+  <!-- L1 (top left, authored) -->
+  <g>
+    <rect x="40" y="120" width="260" height="120" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+    <text x="60" y="148" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#4338ca">L1</text>
+    <text x="110" y="148" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#4338ca">core_blocks</text>
+    <text x="60" y="168" font-family="Inter, sans-serif" font-size="11" fill="#6366f1" font-weight="500">persona · self · user · relationship · mood</text>
+    <text x="60" y="196" font-family="Inter, sans-serif" font-size="10" fill="#4f46e5" font-style="italic">— "who the persona is"</text>
+    <text x="60" y="214" font-family="Inter, sans-serif" font-size="10" fill="#64748b">✍️ authored · by human (onboarding / admin)</text>
+    <text x="60" y="228" font-family="Inter, sans-serif" font-size="10" fill="#64748b">📖 read every single turn</text>
+  </g>
+
+  <!-- L2 (top right, raw capture) -->
+  <g>
+    <rect x="700" y="120" width="260" height="120" rx="12" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+    <text x="720" y="148" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#0c4a6e">L2</text>
+    <text x="770" y="148" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#0c4a6e">recall_messages</text>
+    <text x="720" y="168" font-family="Inter, sans-serif" font-size="11" fill="#0284c7" font-weight="500">every user + persona message, verbatim</text>
+    <text x="720" y="196" font-family="Inter, sans-serif" font-size="10" fill="#0369a1" font-style="italic">— "the ground truth"</text>
+    <text x="720" y="214" font-family="Inter, sans-serif" font-size="10" fill="#64748b">✍️ captured · per-message · atomic</text>
+    <text x="720" y="228" font-family="Inter, sans-serif" font-size="10" fill="#64748b">📖 recent-window (last ~20) into prompt</text>
+  </g>
+
+  <!-- L3 (bottom left, distilled) -->
+  <g>
+    <rect x="40" y="440" width="260" height="140" rx="12" fill="#f0fdf4" stroke="#10b981" stroke-width="2"/>
+    <text x="60" y="468" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#065f46">L3</text>
+    <text x="110" y="468" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#065f46">events</text>
+    <text x="60" y="488" font-family="Inter, sans-serif" font-size="11" fill="#059669" font-weight="500">concept_nodes WHERE type=EVENT</text>
+    <text x="60" y="516" font-family="Inter, sans-serif" font-size="10" fill="#047857" font-style="italic">— "what happened, distilled"</text>
+    <text x="60" y="534" font-family="Inter, sans-serif" font-size="10" fill="#64748b">✍️ LLM extract · when session closes</text>
+    <text x="60" y="548" font-family="Inter, sans-serif" font-size="10" fill="#64748b">+ signed emotional_impact [-10, +10]</text>
+    <text x="60" y="562" font-family="Inter, sans-serif" font-size="10" fill="#64748b">📖 vector-search retrieval → every prompt</text>
+  </g>
+
+  <!-- L4 (bottom right, reflected) -->
+  <g>
+    <rect x="700" y="440" width="260" height="140" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+    <text x="720" y="468" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#92400e">L4</text>
+    <text x="770" y="468" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="#92400e">thoughts</text>
+    <text x="720" y="488" font-family="Inter, sans-serif" font-size="11" fill="#d97706" font-weight="500">concept_nodes WHERE type=THOUGHT</text>
+    <text x="720" y="516" font-family="Inter, sans-serif" font-size="10" fill="#b45309" font-style="italic">— "long-term impressions"</text>
+    <text x="720" y="534" font-family="Inter, sans-serif" font-size="10" fill="#64748b">✍️ LLM reflect · 1-2 per session · gated</text>
+    <text x="720" y="548" font-family="Inter, sans-serif" font-size="10" fill="#64748b">+ filling[] cites L3 event IDs (evidence)</text>
+    <text x="720" y="562" font-family="Inter, sans-serif" font-size="10" fill="#64748b">📖 vector-search retrieval → every prompt</text>
+  </g>
+
+  <!-- Arrows -->
+
+  <!-- user → prompt -->
+  <line x1="140" y1="74" x2="450" y2="278" stroke="#b45309" stroke-width="1.5" marker-end="url(#arr-write)"/>
+  <text x="270" y="170" font-family="JetBrains Mono, monospace" font-size="10" fill="#b45309" transform="rotate(30 270 170)">input</text>
+
+  <!-- prompt → persona reply -->
+  <line x1="550" y1="278" x2="860" y2="74" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arr-distill)"/>
+  <text x="700" y="170" font-family="JetBrains Mono, monospace" font-size="10" fill="#7c3aed" transform="rotate(-30 700 170)">streamed reply</text>
+
+  <!-- L1 → prompt (read) -->
+  <line x1="300" y1="200" x2="385" y2="295" stroke="#0f766e" stroke-width="1.5" marker-end="url(#arr-read)" stroke-dasharray="4,3"/>
+  <text x="322" y="238" font-family="JetBrains Mono, monospace" font-size="10" fill="#0f766e">read · every turn</text>
+
+  <!-- L2 capture from both user+persona -->
+  <line x1="400" y1="340" x2="700" y2="180" stroke="#b45309" stroke-width="1.5" marker-end="url(#arr-write)" stroke-dasharray="4,3"/>
+  <text x="555" y="260" font-family="JetBrains Mono, monospace" font-size="10" fill="#b45309" transform="rotate(-28 555 260)">capture verbatim</text>
+
+  <!-- L2 → L3 (extract) -->
+  <path d="M 780 240 Q 500 390 200 440" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-distill)"/>
+  <text x="480" y="380" font-family="Inter, sans-serif" font-size="11" fill="#7c3aed" font-weight="600">① session closes · LLM extract</text>
+  <text x="530" y="396" font-family="Inter, sans-serif" font-size="9" fill="#a78bfa">prompts/extraction.py · 0–3 events · signed impact · 6 relational tags</text>
+
+  <!-- L3 → L4 (reflect) -->
+  <line x1="300" y1="510" x2="700" y2="510" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-distill)"/>
+  <text x="410" y="500" font-family="Inter, sans-serif" font-size="11" fill="#7c3aed" font-weight="600">② gate passes · LLM reflect</text>
+  <text x="360" y="530" font-family="Inter, sans-serif" font-size="9" fill="#a78bfa">prompts/reflection.py · 1–2 thoughts · tone rules · cited filling</text>
+
+  <!-- L4 → L3 (filling evidence · back-arrow) -->
+  <path d="M 700 540 Q 500 560 300 540" fill="none" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr-filling)" stroke-dasharray="3,3"/>
+  <text x="430" y="598" font-family="Inter, sans-serif" font-size="10" fill="#64748b">filling[] — evidence chain (parent=thought → child=event)</text>
+
+  <!-- L3 → prompt (retrieve) -->
+  <path d="M 170 440 Q 300 360 395 335" fill="none" stroke="#0f766e" stroke-width="1.5" marker-end="url(#arr-read)" stroke-dasharray="4,3"/>
+
+  <!-- L4 → prompt (retrieve) -->
+  <path d="M 830 440 Q 700 360 605 335" fill="none" stroke="#0f766e" stroke-width="1.5" marker-end="url(#arr-read)" stroke-dasharray="4,3"/>
+
+  <text x="320" y="390" font-family="JetBrains Mono, monospace" font-size="10" fill="#0f766e">retrieve</text>
+  <text x="640" y="390" font-family="JetBrains Mono, monospace" font-size="10" fill="#0f766e">retrieve</text>
+
+  <!-- Legend box inside the diagram bottom -->
+  <g>
+    <rect x="40" y="650" width="920" height="46" rx="8" fill="#fafbfc" stroke="#e2e8f0"/>
+    <line x1="60" y1="673" x2="100" y2="673" stroke="#b45309" stroke-width="2" marker-end="url(#arr-write)"/>
+    <text x="108" y="677" font-family="Inter, sans-serif" font-size="11" fill="#334155">write · 写入 (人 / daemon / LLM)</text>
+
+    <line x1="320" y1="673" x2="360" y2="673" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-distill)"/>
+    <text x="368" y="677" font-family="Inter, sans-serif" font-size="11" fill="#334155">distill · 提炼 (LLM 调用)</text>
+
+    <line x1="560" y1="673" x2="600" y2="673" stroke="#0f766e" stroke-width="2" marker-end="url(#arr-read)" stroke-dasharray="4,3"/>
+    <text x="608" y="677" font-family="Inter, sans-serif" font-size="11" fill="#334155">read · 读入 prompt (每 turn)</text>
+
+    <line x1="800" y1="673" x2="840" y2="673" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-filling)" stroke-dasharray="3,3"/>
+    <text x="848" y="677" font-family="Inter, sans-serif" font-size="11" fill="#334155">evidence · 溯源链</text>
+  </g>
+</svg>
+</div>
+
+<!-- ─── Layer cards ─── -->
+<div class="legend">
+  <div class="leg-item l1">
+    <h3><span class="lv">L1</span>core_blocks</h3>
+    <div class="sub">
+      Five <strong>authored</strong> identity documents — persona, self, user, relationship, mood. Written by humans during onboarding or via the admin UI. Always sit at the top of every LLM prompt.
+      <br><br>
+      <code>1 row per label</code> · never auto-distilled
+    </div>
+  </div>
+
+  <div class="leg-item l2">
+    <h3><span class="lv">L2</span>recall_messages</h3>
+    <div class="sub">
+      Every message <strong>verbatim</strong> — user and persona, both sides of every turn. No transformation. The ground truth other layers can reconstruct from.
+      <br><br>
+      <code>1 row per message</code> · FTS5 indexed · recent-window into prompt
+    </div>
+  </div>
+
+  <div class="leg-item l3">
+    <h3><span class="lv">L3</span>events</h3>
+    <div class="sub">
+      Episodic memory. When a session closes, an LLM reads L2 and distills <strong>0–3 discrete events</strong>, each with a signed <code>emotional_impact</code> in <code>[-10, +10]</code> and up to 3 relational tags from a closed vocabulary.
+      <br><br>
+      <code>concept_nodes</code> WHERE <code>type=EVENT</code> · embedded via sqlite-vec
+    </div>
+  </div>
+
+  <div class="leg-item l4">
+    <h3><span class="lv">L4</span>thoughts</h3>
+    <div class="sub">
+      Long-term impressions. After gate passes (shock OR timer, never over <code>3/24h</code>), an LLM reflects on recent L3 events and produces <strong>1–2 thoughts</strong>. Every thought <strong>must cite</strong> its source event IDs via <code>filling[]</code>.
+      <br><br>
+      <code>concept_nodes</code> WHERE <code>type=THOUGHT</code> · edges in <code>concept_node_filling</code>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Three interaction modes ─── -->
+<div class="triple">
+  <div class="mode write">
+    <h3><span class="pill">write</span>Immediate · per message</h3>
+    <p>
+      L2 captures every incoming and outgoing message <em>before</em> the LLM streams a reply. This is the only write that happens on the turn's critical path. Latency matters here; keep it fast.
+      <br><br>
+      L1 is also a write target, but only by admin edits and the onboarding bootstrap — never per-turn.
+    </p>
+  </div>
+  <div class="mode distill">
+    <h3><span class="pill">distill</span>Deferred · per session</h3>
+    <p>
+      After a session idle-closes (default 30min), a background worker pulls L2 messages and asks a small LLM to extract <strong>0–3 events</strong> (L3). If the reflection gate allows, a medium LLM then reflects on recent events to produce <strong>1–2 thoughts</strong> (L4), each with explicit <code>filling[]</code> evidence.
+    </p>
+  </div>
+  <div class="mode read">
+    <h3><span class="pill">read</span>Fused · every turn</h3>
+    <p>
+      At assembly time, every new user message triggers: L1 read (all 5 blocks), L2 read (recent window), and an L3+L4 vector search with ranking formula:
+      <br><br>
+      <code>total = 0.5·recency + 3·relevance + 2·|impact| + 1·relational_bonus</code>
+      <br><br>
+      Nothing ever filters by channel_id (iron rule D4).
+    </p>
+  </div>
+</div>
+
+<!-- ─── Lineage / credit ─── -->
+<div style="margin-top:40px; padding:20px 24px; background:#fff; border:1.5px solid #c4b5fd; border-radius:12px; background:linear-gradient(180deg,#f5f3ff 0%, #fff 40%);">
+  <h3 style="color:#5b21b6; font-size:14px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+    📚 Where this scoring formula comes from
+  </h3>
+  <p style="font-size:12px; color:#475569; line-height:1.7;">
+    The retrieval scoring is a direct descendant of Stanford's 2023
+    <a href="https://arxiv.org/abs/2304.03442" style="color:#5b21b6; font-weight:500;">Generative Agents</a> paper
+    (Park et al., "Interactive Simulacra of Human Behavior").
+    In their implementation at
+    <code style="font-family:'JetBrains Mono', monospace; background:#ede9fe; padding:1px 5px; border-radius:3px; font-size:11px;">reverie/backend_server/persona/cognitive_modules/retrieve.py</code>,
+    the <code style="font-family:'JetBrains Mono', monospace; background:#ede9fe; padding:1px 5px; border-radius:3px; font-size:11px;">new_retrieve()</code> function fuses three signals:
+    <strong>recency × 0.5</strong>, <strong>relevance × 3.0</strong>, <strong>importance × 2.0</strong>.
+    EchoVessel's weights are lifted verbatim from there.
+  </p>
+  <p style="font-size:12px; color:#475569; line-height:1.7; margin-top:8px;">
+    Four deliberate divergences from the Stanford original:
+  </p>
+  <ol style="font-size:12px; color:#475569; line-height:1.7; padding-left:24px; margin-top:6px;">
+    <li><strong>Added <code style="font-family:'JetBrains Mono', monospace;">relational_bonus × 1.0</code></strong> — a closed-vocabulary tag bonus (identity-bearing / unresolved / vulnerability / turning-point / correction / commitment) tuned for long-term companionship scenarios, where "core facts about who the user is" deserve extra pull.</li>
+    <li><strong>Time-based recency instead of position-based decay.</strong> Stanford: <code style="font-family:'JetBrains Mono', monospace;">decay^i</code> where <em>i</em> is rank in last-accessed order — being retrieved <em>refreshes</em> the memory (cognitive-psychology "rehearsal" effect). EchoVessel: 14-day half-life from <code style="font-family:'JetBrains Mono', monospace;">created_at</code>, access never refreshes. Diary-style vs brain-style.</li>
+    <li><strong>Signed <code style="font-family:'JetBrains Mono', monospace;">emotional_impact ∈ [-10, +10]</code></strong> instead of their unsigned <code style="font-family:'JetBrains Mono', monospace;">poignancy ∈ [1, 10]</code>. Lets grief (-9) and joy (+9) stay separated in retrieval; the <em>magnitude</em> drives salience, the <em>sign</em> drives valence grouping.</li>
+    <li><strong>Min-relevance floor of 0.4</strong> — candidates whose cosine similarity to the query is below the floor get dropped before scoring. Stops truly-orthogonal high-impact memories from surfacing on totally unrelated queries. Added after the Over-recall eval metric flagged the failure mode.</li>
+  </ol>
+  <p style="font-size:11px; color:#64748b; line-height:1.6; margin-top:12px; padding-top:10px; border-top:1px solid #e9d5ff;">
+    Park's original comment in the reference code: <em>"these weights should likely be learned, perhaps through an RL-like process"</em>.
+    For now both projects hand-tune to <code style="font-family:'JetBrains Mono', monospace;">[0.5, 3, 2]</code>.
+    If you find a better set via eval, the whole ranker is just four floats in <code style="font-family:'JetBrains Mono', monospace;">memory/retrieve.py</code>.
+  </p>
+</div>
+
+<div class="footer">
+  <a href="../architecture.html">← architecture.html (anatomy)</a> ·
+  <a href="../architecture-flow.html">architecture-flow.html (nervous system) →</a>
+  <br>
+  <br>
+  EchoVessel v0.0.1-alpha · 2026-04-16
+</div>
+
+</body>
+</html>

@@ -37,7 +37,7 @@ EchoVessel/
 │   ├── memory/               L1-L4 persona 记忆
 │   ├── voice/                TTS / STT / 语音克隆
 │   ├── channels/             Channel Protocol + 具体 channel
-│   │   └── web/frontend/     React 19 + Vite + TypeScript UI prototype
+│   │   └── web/frontend/     React 19 + Vite + TypeScript UI 源码(编入 `web/static/`)
 │   ├── proactive/            自主消息引擎
 │   ├── prompts/              extraction / reflection / interaction 的 system prompt
 │   ├── import_/              通用 LLM importer pipeline

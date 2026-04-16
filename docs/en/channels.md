@@ -2,6 +2,8 @@
 
 ## Overview
 
+> 🧭 **Naming note.** EchoVessel's **channel** (the term used throughout the code and this doc) is what you might call a **stateful message gateway** in API-infrastructure terms. Each channel translates between one external transport's protocol (Discord WebSocket, HTTP POST + SSE for the Web UI, future iMessage webhook, etc.) and the daemon's internal `IncomingTurn` / `OutgoingMessage` format, while carrying the connection-level state that translation needs (debounce timers, in-flight turn tracking, per-user DM routing). "Channel" is the chat-UX-flavoured name for the same concept — we kept it because that's what end users see in Discord / Slack / iMessage. If "gateway" is a clearer mental model for you, substitute freely; the code will keep saying "channel."
+
 **Channels are dumb I/O adapters.** A channel owns a single external transport — the Web UI, Discord, iMessage, WeChat — and its only job is to shuttle text between that transport and the rest of the daemon. Channels do not call the LLM, do not read memory, do not decide what the persona says, do not hold persona state. Every "thought" happens one layer up, in `runtime` + `memory` + the prompt assembler. If a channel implementation is tempted to cache a mood block or run a retrieval query, the design is wrong.
 
 **One persona, many mouths.** The architectural commitment at the root of the channel system is that a persona is a single continuous identity across every transport it speaks on. When the same user talks to the persona through the Web UI in the morning and through Discord in the evening, the persona remembers the morning conversation word-for-word — not because each channel ships its own memory, but because there is exactly one memory store and it is *never sharded by transport*. Memory retrieval takes no `channel_id` filter and will never accept one. This is the most load-bearing rule in the whole module: if you break it, the illusion of a single persona collapses, and every channel becomes a separate bot.
@@ -190,11 +192,21 @@ The end-to-end flow for one turn, from a user typing in the Web UI to the person
 
 Runtime's `ChannelRegistry` owns the lifecycle (`start_all` / `stop_all`) and merges every registered channel's `incoming()` into one async stream via `registry.all_incoming()`. The `TurnDispatcher` reads from that merged stream and feeds a single serial handler — so even with four channels live, there is still only one turn being processed at a time. This is intentional: it is the guarantee that lets memory writes and LLM calls assume no concurrent mutation.
 
-### The Web channel prototype
+### The Web channel
 
-The current codebase ships a standalone React prototype for the Web channel frontend under `src/echovessel/channels/web/frontend/`. It is a Vite + TypeScript app that runs on its own (`npm install && npm run dev`) with all state mocked in `localStorage` — no backend required. It exists so that frontend layout, SSE event shapes, and interaction patterns can be iterated independently of the Python daemon.
+The Web channel is fully wired end-to-end. A FastAPI `WebChannel` under `src/echovessel/channels/web/` exposes `POST /api/chat/send`, streams `chat.message.*` events over SSE via `GET /api/chat/events`, implements the debounce state machine described above, and talks to runtime through the Channel Protocol. The React + Vite + TypeScript frontend under `src/echovessel/channels/web/frontend/` is built via `npm run build` into `channels/web/static/` and served by the same daemon at `http://127.0.0.1:7777/` — end users never touch Node.js. Contributors who want to hack on the UI can run `npm run dev` against a live daemon (the dev server proxies to the FastAPI process).
 
-The full backend wire-up — a FastAPI `WebChannel` that exposes `POST /api/message`, streams `chat.message.*` events over SSE, implements the debounce state machine described above, and talks to runtime through the Channel Protocol — is on the roadmap and not yet in the codebase. When it lands it will live under `src/echovessel/channels/web/backend/` and implement the `Channel` Protocol from `base.py`.
+### Cross-channel unified timeline (runtime-owned SSE broadcaster)
+
+EchoVessel's architectural promise is "one persona across every channel." The memory layer has always guaranteed this at the storage level (iron rule D4: retrieval never filters by `channel_id`). As of 2026-04-16 the **live view** is unified too:
+
+- `SSEBroadcaster` is owned by the runtime, not by any single channel.
+- Every channel's turn events (`chat.message.user_appended` / `chat.message.token` / `chat.message.done` / `chat.message.voice_ready`) are mirrored through the broadcaster with a `source_channel_id` field identifying where the turn came from.
+- The Web chat timeline subscribes to the shared SSE stream, so Discord DMs appear inline in real time with a `📱 Discord` pill in the timestamp. iMessage and future channels inherit the behaviour — **no frontend change needed** when a new channel is added, as long as the channel implements the Channel Protocol and turns flow through `runtime.assemble_turn()`.
+- A paired `GET /api/chat/history?limit=50&before=<turn_id>` endpoint returns cross-channel history (still D4-unfiltered) so a fresh browser session backfills past Discord conversations alongside past Web conversations.
+- Turn serialisation still holds: the `TurnDispatcher` processes one turn at a time across the entire process, so the "one persona one brain" invariant is unchanged. Parallel Web + Discord requests simply queue.
+
+The publish path is failure-isolated: if the broadcaster raises, a `log.warning` fires and the originating channel's `send()` still completes. Likewise, if `send()` raises, `chat.message.done` is **not** mirrored — a failed Discord DM will not tell the Web tab the turn succeeded.
 
 ---
 

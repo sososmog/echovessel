@@ -1,8 +1,12 @@
-# EchoVessel
+<p align="center">
+  <img src="./docs/assets/banner.png" alt="EchoVessel · 数字 persona 引擎" width="640">
+</p>
 
-[![CI](https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml/badge.svg)](https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml)
-
-> 🌐 **其他语言版本:** [English](./README.md)
+<p align="center">
+  <a href="https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml"><img src="https://github.com/AlanY1an/echovessel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  &nbsp;·&nbsp;
+  🌐 <a href="./README.md">English</a>
+</p>
 
 *有些人留下回忆。
 有些人留下一副声音。
