@@ -27,19 +27,20 @@ It is a vessel for presence.
 
 v0.0.1 is an early-alpha tagged release. It ships a local-first daemon built on the full 5-module stack (memory / voice / channels / proactive / runtime), with a working Web channel (chat + persona-block admin + voice toggle + first-run onboarding) and a working Discord DM channel. Several admin surfaces are intentional placeholders in this release — see **Known Limitations** in [`CHANGELOG.md`](./CHANGELOG.md) for the full list of what's deferred to v0.0.2+. Tested on macOS and Linux; Windows is not yet supported.
 
-### Install
+### Install (from source)
 
-EchoVessel targets Python **3.11+**. Install from PyPI with [`uv`](https://github.com/astral-sh/uv) (recommended) or plain `pip`:
+EchoVessel targets Python **3.11+**. **There is no PyPI release yet** — clone the repo and run from source using [`uv`](https://github.com/astral-sh/uv):
 
 ```bash
-uv pip install echovessel
-# or: pip install echovessel
+git clone https://github.com/AlanY1an/echovessel.git
+cd echovessel
+uv sync --all-extras
 ```
 
-Optional extras pull in the heavier stacks on demand:
+`--all-extras` pulls every optional stack in one shot. If you want to keep the install lean, pick only what you use:
 
 ```bash
-uv pip install 'echovessel[embeddings,llm,voice,discord]'
+uv sync --extra embeddings --extra llm --extra voice --extra discord
 ```
 
 - `embeddings` — local sentence-transformers embedder
@@ -47,17 +48,17 @@ uv pip install 'echovessel[embeddings,llm,voice,discord]'
 - `voice` — FishAudio TTS SDK
 - `discord` — `discord.py` for the Discord DM channel
 
-End users do **not** need Node.js — the wheel embeds the pre-built React bundle.
+All subsequent commands below are run inside the repo with `uv run …`.
 
 ### First Launch
 
 EchoVessel reads `~/.echovessel/config.toml` for settings and `./.env` (the current working directory at run-time) for API keys. Create both starter files in one shot:
 
 ```bash
-echovessel init
+uv run echovessel init
 ```
 
-`init` writes `~/.echovessel/config.toml` **and** a commented-out `.env` template in the current directory (0600 perms). The daemon auto-loads `./.env` on `echovessel run`, so keep `.env` in the directory you launch from — typically the project root. Uncomment the keys you need:
+`init` writes `~/.echovessel/config.toml` **and** a commented-out `.env` template in the current directory (0600 perms). The daemon auto-loads `./.env` on `uv run echovessel run`, so keep `.env` in the directory you launch from — typically the project root. Uncomment the keys you need:
 
 ```
 OPENAI_API_KEY=sk-...
@@ -72,7 +73,7 @@ Edit `~/.echovessel/config.toml` to pick an LLM provider — zero-config works w
 ### Run the Daemon
 
 ```bash
-echovessel run
+uv run echovessel run
 ```
 
 First startup downloads the sentence-transformers embedder (~90MB, one-time). Subsequent boots are instant.

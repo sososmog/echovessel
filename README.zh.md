@@ -26,19 +26,20 @@ EchoVessel 不是一个通用 chatbot · 它是**为"在场"而造的容器**(a 
 
 v0.0.1 是早期 alpha 版本。它发布一个 local-first daemon · 基于完整 5 模块栈(memory / voice / channels / proactive / runtime)· 含可用的 Web channel(对话 + 人格 block 编辑 + 语音开关 + 首次 onboarding)和可用的 Discord DM channel。**部分 admin 面板在本版本是 placeholder**——具体延后到 v0.0.2+ 的项目见 [`CHANGELOG.md`](./CHANGELOG.md) 的 **Known Limitations** 一节。已在 macOS 和 Linux 上测试;Windows 暂不支持。
 
-### 安装
+### 从源码安装
 
-EchoVessel 要求 Python **3.11+**。从 PyPI 用 [`uv`](https://github.com/astral-sh/uv)(推荐)或 `pip` 安装:
+EchoVessel 要求 Python **3.11+**。**目前还没发 PyPI**,从源码跑:
 
 ```bash
-uv pip install echovessel
-# 或:pip install echovessel
+git clone https://github.com/AlanY1an/echovessel.git
+cd echovessel
+uv sync --all-extras
 ```
 
-按需引入可选 extras:
+`--all-extras` 一次装全。只装用得到的:
 
 ```bash
-uv pip install 'echovessel[embeddings,llm,voice,discord]'
+uv sync --extra embeddings --extra llm --extra voice --extra discord
 ```
 
 - `embeddings` — 本地 sentence-transformers embedder
@@ -46,14 +47,14 @@ uv pip install 'echovessel[embeddings,llm,voice,discord]'
 - `voice` — FishAudio TTS SDK
 - `discord` — `discord.py` · Discord DM channel
 
-终端用户**不需要** Node.js · wheel 里已经内嵌了构建好的 React bundle。
+下面所有命令都在 repo 根目录用 `uv run …` 跑。
 
 ### 首次启动
 
 EchoVessel 从 `~/.echovessel/config.toml` 读配置 · 从**当前工作目录**的 `./.env` 读 API 密钥。一条命令同时生成这两个:
 
 ```bash
-echovessel init
+uv run echovessel init
 ```
 
 `init` 把 `~/.echovessel/config.toml` 和一个注释全关掉的 `.env` 写到**当前目录**(权限 0600)。daemon 启动时自动加载 `./.env`,所以 `.env` 要留在你启动 daemon 的那个目录(通常是项目根)。按需取消注释填值:
@@ -71,7 +72,7 @@ ECHOVESSEL_DISCORD_TOKEN=...    # 可选 · Discord bot token
 ### 启动 Daemon
 
 ```bash
-echovessel run
+uv run echovessel run
 ```
 
 首次启动会下载 sentence-transformers embedder(~90MB · 一次性)· 之后启动瞬时完成。

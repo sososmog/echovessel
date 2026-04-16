@@ -58,8 +58,8 @@ to a backend (see **Known Limitations**).
 
 #### Packaging
 
-- `hatch` wheel + sdist publishing.
-- A custom `hatch_build.py` build hook rebuilds the React frontend during packaging so every release ships pre-built static assets — end users do not need Node.js.
+- `hatch` wheel + sdist build targets configured (not yet released to PyPI — v0.0.1 runs from a `git clone` + `uv sync --all-extras`).
+- A custom `hatch_build.py` build hook rebuilds the React frontend during `uv build` so any future wheel carries pre-built static assets and contributors do not need Node.js just to run the daemon.
 - The bundled `config.toml.sample` is shipped as a package resource and is what `echovessel init` writes.
 - Wheel is ~224 KB (frontend bundle excluded except the built static output); sdist is ~231 KB.
 
