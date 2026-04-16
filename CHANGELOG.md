@@ -69,18 +69,20 @@ to a backend (see **Known Limitations**).
 
 ### Changed
 
-- **Cross-channel live sync.** `SSEBroadcaster` is now owned by the runtime and mirrors every channel's turn events (user message, streaming tokens, completion, voice-ready) to all Web SSE subscribers. Each event carries a `source_channel_id`; the Web chat timeline tags non-Web messages with a 📱 Discord / 💬 iMessage pill.
+- **Cross-channel live sync.** `SSEBroadcaster` is now owned by the runtime and mirrors every channel's turn events (user message, streaming tokens, completion, voice-ready) to all Web SSE subscribers. Each event carries a `source_channel_id`; the Web chat timeline tags non-Web messages with a 📱 Discord / 💬 iMessage pill. Fulfils spec Goal G5 (cross-channel unified persona) for the live view.
 - **Chat history backfill.** New `GET /api/chat/history?limit=50&before=<turn_id>` returns the most-recent `recall_messages` across every channel (per iron rule D4) with `has_more` + `oldest_turn_id` for cursor pagination. The Web chat hook fetches this on mount and prepends it to the timeline, turning the Web frontend into a true "god-view" observer of every past turn regardless of origin.
+- **Admin page surfaces are now real.** Events / Thoughts / Voice / Cost / Config tabs all back onto live endpoints (list, forget, clone wizard, cost summary, safe-subset config edit). Persona tab gained a `导入历史材料 →` CTA that drives the Import wizard.
+- **Import pipeline is wired end-to-end.** `/api/admin/import/*` admin routes (upload, estimate, start, cancel, events SSE) reach the `ImporterFacade` constructed in runtime startup. The Web Import wizard (`/admin/import`) walks a real 3-step flow (upload → estimate → live progress). Onboarding path 2 ("上传材料") drives the same pipeline + an LLM bootstrap step that drafts initial core blocks for user review.
+- **Live mood + session boundary** now stream to the Web chat timeline: mood changes reflect in the header in real time, and session rollover renders as a timestamped horizontal marker.
 - GitHub Actions CI enforces `ruff check`, `lint-imports`, and `pytest` on every PR and push to `main`, across ubuntu-latest + macos-latest × Python 3.11.
+
+### Fixed
+
+- **Cost ledger now persists.** `cost_logger.LLMCall` is imported before `create_all_tables()` so the `llm_calls` table actually gets created on fresh boots. Previously every LLM call emitted `cost_logger: failed to persist LLM call: no such table: llm_calls` warnings and the Cost admin tab had nothing to show.
 
 ### Known Limitations
 
-This is an early-alpha release. The following surfaces are intentionally not finished
-in v0.0.1; each is tracked for **v0.0.2** or later.
-
-- **Import flow is not wired into the daemon.** The Onboarding "上传材料让它自动生成" path lands on a placeholder screen. The `import_/` pipeline module is implemented and unit-tested, and an `ImporterFacade` exists on the runtime, but no `/api/admin/import/*` HTTP routes are exposed yet, so neither the Web SPA nor the CLI can drive a real import. **Targeted for v0.0.2.**
-- **Admin → Events / Thoughts / Config tabs are placeholders.** They render the section chrome and (for Events / Thoughts) a server-side row count from `/api/state`, but there is no list view, no per-row delete, and no live cost / model display. The underlying `memory/forget.py` deletion API is implemented in code but has no production caller yet.
-- **Live mood updates and session-rollover markers are not surfaced in the Web chat timeline.** The underlying signals exist inside the runtime but are not broadcast to the frontend; Web chat shows a snapshot mood at render time only. **Targeted for v0.0.2.**
+This is an early-alpha release. The following surfaces remain deliberately out of scope for v0.0.1:
 - **LLM error handling has only classification-level test coverage.** The provider error hierarchy (`LLMTransientError` / `LLMPermanentError` / `LLMBudgetError`) is exercised via helper unit tests; end-to-end retry / degradation behaviour under real network failures is not yet covered.
 - **Runtime CLI tests are smoke-level only.** `echovessel init`, `run`, `status`, `stop`, and `reload` are exercised by the launcher test suite (17 cases: config file round-trip, pidfile lifecycle, signal dispatch, subprocess SIGTERM path), but longer-lived behaviours (24 h-window reflection gating, multi-day idle scanner, real provider failure recovery) are not in the matrix.
 - **Two `runtime/config.py` fields remain informational-only** (`persona.initial_core_blocks_path`, `channels.web.static_dir`). The rest of the schema — including the four `[memory]` / `[consolidate]` tuning knobs — is now consumed by the runtime.

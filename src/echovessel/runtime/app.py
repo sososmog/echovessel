@@ -364,6 +364,13 @@ class Runtime:
             )
             raise
 
+        # Import cost_logger (and any other SQLModel-backed runtime models)
+        # BEFORE create_all_tables so their tables make it into the schema.
+        # SQLModel.metadata is populated as a side effect of class import;
+        # skipping this step leaves the llm_calls table missing and every
+        # record() call in-session warns 'no such table: llm_calls'.
+        from echovessel.runtime import cost_logger  # noqa: F401
+
         create_all_tables(engine)
         backend = SQLiteBackend(engine)
 
