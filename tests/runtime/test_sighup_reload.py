@@ -47,7 +47,13 @@ async def test_reload_replaces_llm_on_config_diff(monkeypatch, tmp_path):
     rt = Runtime.build(
         toml_path, llm=old_stub
     )
-    assert rt.ctx.llm is old_stub
+    # Worker ζ wraps every provider in CostTrackingProvider, so
+    # ``rt.ctx.llm`` is the wrapper; the raw provider lives at
+    # ``rt.ctx.llm._inner``.
+    from echovessel.runtime.cost_logger import CostTrackingProvider
+
+    assert isinstance(rt.ctx.llm, CostTrackingProvider)
+    assert rt.ctx.llm._inner is old_stub  # type: ignore[attr-defined]
 
     # Monkey-patch build_llm_provider to return a fresh stub on next call.
     import echovessel.runtime.app as app_mod
@@ -61,7 +67,9 @@ async def test_reload_replaces_llm_on_config_diff(monkeypatch, tmp_path):
     )
     await rt.reload()
 
-    assert rt.ctx.llm is new_stub
+    # After reload the wrapper still wraps — but its _inner is the new stub.
+    assert isinstance(rt.ctx.llm, CostTrackingProvider)
+    assert rt.ctx.llm._inner is new_stub  # type: ignore[attr-defined]
 
 
 async def test_in_flight_reference_snapshot_survives_reload():
@@ -69,16 +77,23 @@ async def test_in_flight_reference_snapshot_survives_reload():
     retain the old provider even if ctx.llm is replaced mid-turn.
 
     We simulate this by taking a local snapshot, mutating ctx.llm, and
-    asserting the snapshot still points at the old object.
+    asserting the snapshot still points at the old object. After
+    Worker ζ landed, ``ctx.llm`` is a :class:`CostTrackingProvider`
+    wrapper — the snapshot retains the wrapper, and the wrapper's
+    ``_inner`` is the old raw provider.
     """
+    from echovessel.runtime.cost_logger import CostTrackingProvider
+
     cfg = load_config_from_str(SIGHUP_TOML)
     old = StubProvider(fallback="OLD")
     rt = Runtime.build(None, config_override=cfg, llm=old)
 
-    local_snapshot = rt.ctx.llm  # simulates "llm = self.ctx.llm" in handler
+    local_snapshot = rt.ctx.llm  # wrapper around `old`
     new = StubProvider(fallback="NEW")
-    rt.ctx.llm = new
+    rt.ctx.llm = new  # bare reassignment; wrapper not re-applied here
 
     assert rt.ctx.llm is new
-    assert local_snapshot is old  # old provider still alive; Python refcount
+    assert isinstance(local_snapshot, CostTrackingProvider)
+    assert local_snapshot._inner is old  # type: ignore[attr-defined]
+    # And the snapshot still produces the old provider's output.
     assert await local_snapshot.complete("s", "u") == "OLD"

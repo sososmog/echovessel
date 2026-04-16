@@ -325,12 +325,19 @@ class ImporterFacade:
         Wraps :func:`echovessel.import_.run_pipeline` and translates
         all exceptions into ``pipeline.done`` events so the subscriber
         loop always terminates cleanly.
+
+        Worker ζ · the entire pipeline runs inside a ``feature=import``
+        context so each LLM extraction call is attributed to the
+        admin Cost tab's import bucket.
         """
+        from echovessel.runtime.cost_logger import feature_context
+
         state = self._pipelines.get(pipeline_id)
         if state is None or not state.kwargs:
             return
         try:
-            await run_pipeline(**state.kwargs)
+            with feature_context("import"):
+                await run_pipeline(**state.kwargs)
         except asyncio.CancelledError:
             state.status = "cancelled"
             await self._emit(

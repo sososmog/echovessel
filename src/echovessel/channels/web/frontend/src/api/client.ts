@@ -18,6 +18,11 @@
 
 import type {
   ChatSendPayload,
+  ConfigGetResponse,
+  ConfigPatchPayload,
+  ConfigPatchResponse,
+  CostRecentResponse,
+  CostSummaryResponse,
   DaemonState,
   DeleteChoice,
   DeleteResponse,
@@ -226,6 +231,32 @@ export async function postImportCancel(
   })
 }
 
+// ─── Config endpoints (Worker η) ────────────────────────────────────────
+
+/**
+ * GET /api/admin/config — safe subset of the live daemon config. No
+ * secrets (`api_key_present: boolean` only) + system info (uptime,
+ * db size, version) folded in so the ConfigTab only makes one call.
+ */
+export async function getConfig(): Promise<ConfigGetResponse> {
+  return fetchJson<ConfigGetResponse>('/api/admin/config')
+}
+
+/**
+ * PATCH /api/admin/config — apply a nested patch dict. Server atomic-
+ * writes config.toml, validates with Pydantic, triggers an internal
+ * reload, then returns the applied field paths. Rejects restart-
+ * required fields with 400 and out-of-range values with 422.
+ */
+export async function patchConfig(
+  payload: ConfigPatchPayload,
+): Promise<ConfigPatchResponse> {
+  return fetchJson<ConfigPatchResponse>('/api/admin/config', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 // ─── Memory list + delete endpoints (Worker α / W-β) ────────────────────
 
 /** Build a path with `?limit=&offset=` query string. */
@@ -306,6 +337,26 @@ export async function deleteMemoryThought(
   return fetchJson<DeleteResponse>(
     `/api/admin/memory/thoughts/${nodeId}?choice=${choice}`,
     { method: 'DELETE' },
+  )
+}
+
+// ─── Cost endpoints (Worker ζ) ──────────────────────────────────────────
+
+/** GET /api/admin/cost/summary?range=today|7d|30d */
+export async function getCostSummary(
+  range: 'today' | '7d' | '30d' = '30d',
+): Promise<CostSummaryResponse> {
+  return fetchJson<CostSummaryResponse>(
+    `/api/admin/cost/summary?range=${range}`,
+  )
+}
+
+/** GET /api/admin/cost/recent?limit=N */
+export async function getCostRecent(
+  limit = 50,
+): Promise<CostRecentResponse> {
+  return fetchJson<CostRecentResponse>(
+    `/api/admin/cost/recent?limit=${limit}`,
   )
 }
 

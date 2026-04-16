@@ -265,6 +265,9 @@ class Runtime:
         self._web_uvicorn_server: Any = None
         self._web_uvicorn_task: asyncio.Task | None = None
         self._discord_channel: Any = None
+        # Worker η · boot timestamp for the admin `/api/admin/config`
+        # System-info card (uptime_seconds). Set by `start()`.
+        self._started_at: datetime | None = None
 
     # ---- Public accessors (for channels / CLI / tests) ---------------------
 
@@ -373,6 +376,25 @@ class Runtime:
         if embed_fn is None:
             embed_fn = build_zero_embedder()
 
+        # --- Worker ζ · Cost tracking wrapper ---------------------------
+        #
+        # Wrap the underlying LLMProvider in CostTrackingProvider so every
+        # ``complete`` / ``stream`` call gets persisted into ``llm_calls``.
+        # The wrapper is transparent — provider_name / model_for / call
+        # signatures all delegate to ``llm`` — and adds one synchronous DB
+        # write per call. Failures inside the recorder are caught and
+        # logged so the daemon's hot path is unaffected.
+        from echovessel.runtime.cost_logger import (
+            CostRecorder,
+            CostTrackingProvider,
+        )
+
+        def _cost_db_factory() -> DbSession:
+            return DbSession(engine)
+
+        cost_recorder = CostRecorder(_cost_db_factory)
+        llm = CostTrackingProvider(llm, cost_recorder)
+
         # --- Step 10.5 · Instantiate VoiceService (Round 2) -------------
         #
         # Voice spec §7.3.2: runtime builds the VoiceService after
@@ -460,6 +482,12 @@ class Runtime:
         # Capture running loop so observer dispatch from sync memory
         # callbacks (M-round4) can bridge into async broadcasts.
         self.ctx.loop = asyncio.get_running_loop()
+        # Worker η · stamp boot time so /api/admin/config can surface
+        # uptime_seconds. Kept here rather than in __init__ because
+        # build() → start() may be separated by arbitrary test-setup
+        # time and we want "uptime" to measure running time, not
+        # constructed time.
+        self._started_at = datetime.now()
 
         for ch in channels or []:
             self.ctx.registry.register(ch)
@@ -1013,6 +1041,19 @@ class Runtime:
             # doesn't need branching.
             turn = IncomingTurn.from_single_message(envelope)
 
+        # Worker ζ · Tag every LLM call inside this turn with feature=chat
+        # + the originating turn_id so the admin Cost tab can pivot per
+        # feature and cross-reference per turn.
+        from echovessel.runtime.cost_logger import feature_context
+
+        with feature_context("chat", turn_id=turn.turn_id):
+            await self._handle_turn_body(turn)
+
+    async def _handle_turn_body(self, turn: IncomingTurn) -> None:
+        """Body of :meth:`_handle_turn` that runs inside the cost
+        feature_context. Split out so the wrapper stays small and the
+        original implementation is unchanged below."""
+
         # Capture snapshot of llm reference — SIGHUP reload may replace
         # self.ctx.llm, but this local binding keeps the old provider alive
         # for the duration of this turn (spec §6.5).
@@ -1178,6 +1219,17 @@ class Runtime:
                     "reload: failed to build new LLM provider, keeping old: %s", e
                 )
                 return
+            # Re-wrap the freshly-built provider so SIGHUP reload doesn't
+            # silently drop cost tracking for subsequent calls.
+            from echovessel.runtime.cost_logger import (
+                CostRecorder,
+                CostTrackingProvider,
+            )
+
+            def _cost_db_factory() -> DbSession:
+                return DbSession(self.ctx.engine)
+
+            new_llm = CostTrackingProvider(new_llm, CostRecorder(_cost_db_factory))
             self.ctx.llm = new_llm
             try:
                 old_model = old_llm.model_for(LLMTier.LARGE)
@@ -1193,6 +1245,37 @@ class Runtime:
 
         self.ctx.config = new_config
         log.info("config reloaded from %s", self.ctx.config_path)
+
+    # ---- Worker ζ · cost ledger accessors (channels.web cannot import) -----
+    #
+    # The web admin router lives in ``echovessel.channels`` and is
+    # forbidden by ``lint-imports`` from importing
+    # ``echovessel.runtime``. The two thin wrappers below give the
+    # router a duck-typed entry point that delegates back into
+    # ``runtime.cost_logger`` without violating the layering contract.
+
+    @staticmethod
+    def cost_summarize(db: DbSession, range_label: str) -> dict[str, Any]:
+        """Wrapper for :func:`echovessel.runtime.cost_logger.summarize`."""
+
+        from echovessel.runtime.cost_logger import summarize as _summarize
+
+        return _summarize(db, range_label=range_label)
+
+    @staticmethod
+    def cost_list_recent(db: DbSession, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Wrapper for :func:`echovessel.runtime.cost_logger.list_recent`.
+
+        Returns plain dicts (admin route serialises them straight to JSON)
+        so callers do not need to import ``LLMCallRecord`` from the
+        runtime layer.
+        """
+
+        from dataclasses import asdict
+
+        from echovessel.runtime.cost_logger import list_recent as _list_recent
+
+        return [asdict(r) for r in _list_recent(db, limit=limit)]
 
     # ---- v0.4 · voice_enabled toggle (§17a.7) ------------------------------
 
@@ -1324,6 +1407,170 @@ class Runtime:
             pass
         finally:
             os.close(dir_fd)
+
+    def _atomic_write_config_patches(
+        self,
+        patches: dict[str, dict[str, Any]],
+    ) -> None:
+        """Atomic multi-field write for the admin PATCH route (Worker η).
+
+        `patches` is a nested dict ``{section: {field: value}}``. The
+        whole payload is merged into the current TOML in one pass and
+        committed via a single ``os.replace`` — no intermediate partial
+        states are visible on disk even if the process is killed
+        mid-way.
+
+        Callers are responsible for:
+          - Allowlisting keys against `HOT_RELOADABLE_CONFIG_PATHS`
+          - Validating the merged dict with `Config.model_validate`
+            before calling this helper (so the TOML on disk is never
+            malformed)
+
+        Raises the same filesystem exceptions as
+        :meth:`_atomic_write_config_field`; the caller wraps them into
+        an ``HTTPException(500)``.
+        """
+        assert self.ctx.config_path is not None, (
+            "caller guarantees a config file exists (config_override "
+            "mode is rejected before this point)"
+        )
+
+        path = Path(self.ctx.config_path)
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+
+        for section, fields in patches.items():
+            if section not in data or not isinstance(data.get(section), dict):
+                data[section] = {}
+            for fname, value in fields.items():
+                data[section][fname] = value
+
+        parent = path.parent
+        fd, tmp_path_str = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(parent)
+        )
+        tmp_path = Path(tmp_path_str)
+        try:
+            with os.fdopen(fd, "wb") as tf:
+                tf.write(tomli_w.dumps(data).encode("utf-8"))
+                tf.flush()
+                os.fsync(tf.fileno())
+            os.replace(tmp_path, path)
+        except Exception:
+            with contextlib.suppress(FileNotFoundError, OSError):
+                os.unlink(tmp_path)
+            raise
+
+        try:
+            dir_fd = os.open(str(parent), os.O_DIRECTORY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        except OSError:
+            pass
+        finally:
+            os.close(dir_fd)
+
+    async def apply_config_patches(
+        self,
+        patches: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        """End-to-end admin PATCH handler (Worker η).
+
+        Takes a nested ``{section: {field: value}}`` dict, validates the
+        merged TOML against the Pydantic :class:`Config` schema, writes
+        the merged dict atomically, then triggers a reload so the new
+        values are live. Returns the list of ``"section.field"`` paths
+        that were applied.
+
+        The caller (``PATCH /api/admin/config``) is responsible for
+        rejecting restart-required / unknown fields BEFORE calling this
+        method — we only validate values here, not key-whitelisting.
+
+        Pydantic's nested TOML validation also verifies values (e.g.
+        ``llm.temperature`` in ``[0.0, 2.0]``). Any validation failure
+        raises :class:`ValueError` with the pydantic error string so
+        the admin route can map it to an HTTP 422.
+
+        Raises:
+            RuntimeError: daemon was built without a config file
+                (config_override mode). The on-disk TOML is the
+                persistence target; no file means nothing to update.
+            ValueError: the merged config failed pydantic validation.
+                Nothing is written to disk in this case.
+
+        Returns:
+            Sorted list of ``"section.field"`` paths that were applied.
+        """
+        if self.ctx.config_path is None:
+            raise RuntimeError(
+                "cannot patch config: daemon started without a config "
+                "file (config_override mode)"
+            )
+
+        # Flatten patches into path-strings for the return value.
+        applied_paths = sorted(
+            f"{section}.{fname}"
+            for section, fields in patches.items()
+            for fname in fields
+        )
+
+        # Step 1 · load current TOML + merge patches in memory.
+        path = Path(self.ctx.config_path)
+        with open(path, "rb") as f:
+            merged = tomllib.load(f)
+        for section, fields in patches.items():
+            if section not in merged or not isinstance(
+                merged.get(section), dict
+            ):
+                merged[section] = {}
+            for fname, value in fields.items():
+                merged[section][fname] = value
+
+        # Step 2 · validate the MERGED dict against the Pydantic schema.
+        # We catch ValidationError and re-raise as ValueError so the
+        # caller can treat any "invalid value" uniformly regardless of
+        # which field triggered it.
+        from pydantic import ValidationError
+
+        try:
+            Config.model_validate(merged)
+        except ValidationError as e:
+            raise ValueError(str(e)) from e
+
+        # Step 3 · commit the merged TOML atomically.
+        self._atomic_write_config_patches(patches)
+
+        # Step 4 · propagate to live ctx. `reload()` re-reads from disk,
+        # re-validates, swaps ctx.config, and rebuilds the LLM provider
+        # if [llm] changed. It logs-and-returns on failure; we already
+        # validated so reload() should succeed.
+        await self.reload()
+
+        # Step 5 · mirror persona.display_name if it was patched.
+        # reload() updates ctx.config but NOT ctx.persona (a separate
+        # runtime object), so display_name changes would otherwise stay
+        # invisible to callers reading ctx.persona.
+        persona_patch = patches.get("persona", {})
+        if "display_name" in persona_patch:
+            new_name = persona_patch["display_name"]
+            self.ctx.persona.display_name = new_name
+            try:
+                with DbSession(self.ctx.engine) as db:
+                    persona_row = db.get(Persona, self.ctx.persona.id)
+                    if persona_row is not None:
+                        persona_row.display_name = new_name
+                        db.add(persona_row)
+                        db.commit()
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "persona row display_name mirror failed (keeping "
+                    "in-memory + TOML values): %s",
+                    e,
+                )
+
+        return applied_paths
 
     # ---- Local-first disclosure (spec §13.1) -------------------------------
 

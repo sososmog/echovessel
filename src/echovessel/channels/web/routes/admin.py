@@ -32,13 +32,26 @@ Design constraints (see §3 of the tracker):
 from __future__ import annotations
 
 import logging
-from typing import Any
+import os
+from datetime import datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
+from pathlib import Path
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Body, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session as DbSession
 from sqlmodel import func, select
 
+# NOTE: the allowlists live in `echovessel.core.config_paths`, NOT in
+# `echovessel.runtime.config`, because channels → runtime would break
+# the layered-architecture contract (channels imports core, runtime
+# imports everything above core).
+from echovessel.core.config_paths import (
+    HOT_RELOADABLE_CONFIG_PATHS,
+    RESTART_REQUIRED_CONFIG_PATHS,
+)
 from echovessel.core.types import BlockLabel, NodeType
 from echovessel.memory import (
     CoreBlock,
@@ -442,6 +455,41 @@ def build_admin_router(*, runtime: Any) -> APIRouter:
             "voice_enabled": bool(runtime.ctx.persona.voice_enabled),
         }
 
+    # ---- GET /api/admin/cost/summary -----------------------------------
+    #
+    # Worker ζ · admin Cost tab. ``range`` is one of today | 7d | 30d.
+    # Returns aggregated totals plus per-feature and per-day buckets.
+    #
+    # The query helpers live in :mod:`echovessel.runtime.cost_logger`,
+    # which channels.web cannot import directly without violating the
+    # layered-architecture contract. We reach them through two helper
+    # methods hung on the duck-typed ``runtime`` object — same
+    # technique used elsewhere for ``runtime.update_persona_voice_enabled``.
+
+    @router.get("/api/admin/cost/summary")
+    async def get_cost_summary(
+        range: str = Query(
+            default="30d",
+            pattern="^(today|7d|30d)$",
+            description="Window: today | 7d | 30d",
+        ),
+    ) -> dict[str, Any]:
+        with _open_db() as db:
+            return runtime.cost_summarize(db, range)
+
+    # ---- GET /api/admin/cost/recent ------------------------------------
+
+    @router.get("/api/admin/cost/recent")
+    async def get_cost_recent(
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        with _open_db() as db:
+            rows = runtime.cost_list_recent(db, limit=limit)
+        return {
+            "limit": limit,
+            "items": [dict(r) for r in rows],
+        }
+
     # ---- GET /api/admin/memory/events ----------------------------------
     #
     # Worker α · paginated list for the Admin Events tab. Returns the
@@ -713,6 +761,183 @@ def build_admin_router(*, runtime: Any) -> APIRouter:
                 )
             delete_core_block_append(db, append_id)
         return {"deleted": True, "append_id": append_id, "label": label}
+
+    # ---- GET /api/admin/config -----------------------------------------
+    #
+    # Worker η · Config tab. Returns the "safe subset" of the daemon's
+    # live config — never the API key material, only whether it's
+    # present in the environment. Sections the UI displays but cannot
+    # edit (system info) are folded into the same response so the
+    # frontend only makes one round trip.
+
+    @router.get("/api/admin/config")
+    async def get_config() -> dict[str, Any]:
+        cfg = runtime.ctx.config
+        llm = cfg.llm
+
+        # System-info card · data_dir + db_path + size + uptime + version.
+        data_dir = Path(cfg.runtime.data_dir).expanduser()
+        db_path = data_dir / cfg.memory.db_path
+        try:
+            db_size_bytes = int(db_path.stat().st_size)
+        except (FileNotFoundError, OSError):
+            db_size_bytes = 0
+        try:
+            version = pkg_version("echovessel")
+        except PackageNotFoundError:
+            version = "unknown"
+        uptime_seconds = 0
+        if runtime._started_at is not None:
+            uptime_seconds = int(
+                (datetime.now() - runtime._started_at).total_seconds()
+            )
+
+        return {
+            "llm": {
+                "provider": llm.provider,
+                "model": llm.model,
+                "api_key_env": llm.api_key_env,
+                "timeout_seconds": int(llm.timeout_seconds),
+                "temperature": float(llm.temperature),
+                "max_tokens": int(llm.max_tokens),
+                # `api_key_present` is a boolean presence check against
+                # os.environ so the UI can render "🟢 key loaded" /
+                # "🔴 missing" without ever seeing the actual key.
+                "api_key_present": bool(os.environ.get(llm.api_key_env)),
+            },
+            "persona": {
+                "display_name": runtime.ctx.persona.display_name,
+                "voice_enabled": bool(runtime.ctx.persona.voice_enabled),
+                "voice_id": runtime.ctx.persona.voice_id,
+            },
+            "memory": {
+                "retrieve_k": int(cfg.memory.retrieve_k),
+                "relational_bonus_weight": float(
+                    cfg.memory.relational_bonus_weight
+                ),
+                "recent_window_size": int(cfg.memory.recent_window_size),
+            },
+            "consolidate": {
+                "trivial_message_count": int(
+                    cfg.consolidate.trivial_message_count
+                ),
+                "trivial_token_count": int(
+                    cfg.consolidate.trivial_token_count
+                ),
+                "reflection_hard_gate_24h": int(
+                    cfg.consolidate.reflection_hard_gate_24h
+                ),
+            },
+            "system": {
+                "data_dir": str(cfg.runtime.data_dir),
+                "db_path": cfg.memory.db_path,
+                "version": version,
+                "uptime_seconds": uptime_seconds,
+                "db_size_bytes": db_size_bytes,
+                "config_path": (
+                    str(runtime.ctx.config_path)
+                    if runtime.ctx.config_path is not None
+                    else None
+                ),
+            },
+        }
+
+    # ---- PATCH /api/admin/config ---------------------------------------
+    #
+    # Validates the patch body against HOT_RELOADABLE_CONFIG_PATHS,
+    # rejects RESTART_REQUIRED_CONFIG_PATHS with 400, then delegates the
+    # atomic write + reload to ``Runtime.apply_config_patches``. All
+    # pydantic validation errors (invalid provider, out-of-range slider,
+    # etc.) translate to 422.
+
+    @router.patch("/api/admin/config")
+    async def patch_config(
+        body: Annotated[dict[str, Any], Body(...)],
+    ) -> dict[str, Any]:
+        # Guard: the daemon must have a config file we can rewrite.
+        if runtime.ctx.config_path is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "cannot patch config: daemon started without a "
+                    "config file (config_override mode)"
+                ),
+            )
+
+        # Normalise + validate body shape — must be {section: {field: value}}.
+        if not isinstance(body, dict) or not body:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "request body must be a non-empty object like "
+                    '{"section": {"field": value}}'
+                ),
+            )
+        for section, fields in body.items():
+            if not isinstance(fields, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"section {section!r} must be an object, got "
+                        f"{type(fields).__name__}"
+                    ),
+                )
+
+        # Classify every path as hot / restart-required / unknown.
+        restart_required: list[str] = []
+        unknown: list[str] = []
+        for section, fields in body.items():
+            for field in fields:
+                path = f"{section}.{field}"
+                if path in RESTART_REQUIRED_CONFIG_PATHS:
+                    restart_required.append(path)
+                elif path not in HOT_RELOADABLE_CONFIG_PATHS:
+                    unknown.append(path)
+
+        if restart_required:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "these fields require a daemon restart and cannot "
+                    "be patched at runtime: "
+                    + ", ".join(sorted(restart_required))
+                ),
+            )
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "unknown or read-only config fields: "
+                    + ", ".join(sorted(unknown))
+                ),
+            )
+
+        # Delegate the atomic write + validate + reload path to the
+        # runtime. ValueError → 422 (pydantic validation failed);
+        # RuntimeError → 400 (config_override); OSError → 500.
+        try:
+            applied = await runtime.apply_config_patches(body)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(e),
+            ) from e
+        except RuntimeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from e
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"failed to write config.toml: {e}",
+            ) from e
+
+        return {
+            "updated_fields": applied,
+            "reload_triggered": True,
+            "restart_required": [],
+        }
 
     return router
 

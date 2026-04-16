@@ -79,7 +79,13 @@ def make_extract_fn(llm: LLMProvider) -> ExtractFn:
     batch of RecallMessages and returns memory-layer ExtractedEvents.
 
     Tier: SMALL (consolidate batch; see §6.6).
+
+    Worker ζ · the LLM call below is tagged ``feature=consolidate`` so
+    the admin Cost tab can attribute extraction spend to the
+    background consolidate worker rather than to chat turns.
     """
+
+    from echovessel.runtime.cost_logger import feature_context
 
     async def _extract(messages: list[RecallMessage]) -> list[ExtractedEvent]:
         if not messages:
@@ -106,13 +112,14 @@ def make_extract_fn(llm: LLMProvider) -> ExtractFn:
             messages=formatted_messages,
         )
 
-        raw = await llm.complete(
-            system=EXTRACTION_SYSTEM_PROMPT,
-            user=user_prompt,
-            tier=LLMTier.SMALL,
-            max_tokens=1024,
-            temperature=0.4,
-        )
+        with feature_context("consolidate"):
+            raw = await llm.complete(
+                system=EXTRACTION_SYSTEM_PROMPT,
+                user=user_prompt,
+                tier=LLMTier.SMALL,
+                max_tokens=1024,
+                temperature=0.4,
+            )
 
         try:
             parsed = parse_extraction_response(raw)
@@ -131,7 +138,13 @@ def make_extract_fn(llm: LLMProvider) -> ExtractFn:
 
 
 def make_reflect_fn(llm: LLMProvider) -> ReflectFn:
-    """Build an async `ReflectFn`. Tier: SMALL."""
+    """Build an async `ReflectFn`. Tier: SMALL.
+
+    Worker ζ · tagged ``feature=reflection`` so the admin Cost tab
+    distinguishes reflection spend from straight extraction.
+    """
+
+    from echovessel.runtime.cost_logger import feature_context
 
     async def _reflect(
         nodes: list[ConceptNode], reason: str
@@ -161,13 +174,14 @@ def make_reflect_fn(llm: LLMProvider) -> ReflectFn:
             events=node_snapshots,
         )
 
-        raw = await llm.complete(
-            system=REFLECTION_SYSTEM_PROMPT,
-            user=user_prompt,
-            tier=LLMTier.SMALL,
-            max_tokens=800,
-            temperature=0.6,
-        )
+        with feature_context("reflection"):
+            raw = await llm.complete(
+                system=REFLECTION_SYSTEM_PROMPT,
+                user=user_prompt,
+                tier=LLMTier.SMALL,
+                max_tokens=800,
+                temperature=0.6,
+            )
 
         input_ids = {n.id for n in nodes if n.id is not None}
         try:
@@ -428,6 +442,8 @@ def make_proactive_fn(llm: LLMProvider) -> ProactiveFn:
     Tier: LARGE — proactive output is the user's most direct experience
     of persona voice quality (spec §6.6).
 
+    Worker ζ · tagged ``feature=proactive`` for the admin Cost tab.
+
     Error contract: caller (`MessageGenerator.generate`) catches any
     raised exception and converts it to `SkipReason.LLM_ERROR` /
     `LLM_PARSE_ERROR`, so this closure can raise freely on bad LLM
@@ -436,16 +452,19 @@ def make_proactive_fn(llm: LLMProvider) -> ProactiveFn:
     sends.
     """
 
+    from echovessel.runtime.cost_logger import feature_context
+
     async def _proactive(snapshot: MemorySnapshot) -> ProactiveMessage:
         user_prompt = _format_proactive_user_prompt(snapshot)
 
-        raw = await llm.complete(
-            system=PROACTIVE_SYSTEM_PROMPT,
-            user=user_prompt,
-            tier=LLMTier.LARGE,
-            max_tokens=400,
-            temperature=0.8,
-        )
+        with feature_context("proactive"):
+            raw = await llm.complete(
+                system=PROACTIVE_SYSTEM_PROMPT,
+                user=user_prompt,
+                tier=LLMTier.LARGE,
+                max_tokens=400,
+                temperature=0.8,
+            )
 
         try:
             return _parse_proactive_response(raw)

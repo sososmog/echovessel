@@ -401,6 +401,18 @@ class Config(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# PATCH /api/admin/config allowlist (Worker η)
+# ---------------------------------------------------------------------------
+#
+# The admin PATCH route's allowlist lives in
+# :mod:`echovessel.core.config_paths` so the channels/web admin route
+# can import it without breaking the layered-architecture contract
+# (channels MUST NOT import runtime). If you're reading this module
+# looking for "which fields are hot-reloadable?", open
+# ``src/echovessel/core/config_paths.py``.
+
+
+# ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
 

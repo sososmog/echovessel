@@ -16,4 +16,10 @@ export interface ChatMessage {
   voice?: VoiceMeta
 }
 
-export type AdminTab = 'persona' | 'events' | 'thoughts' | 'voice' | 'config'
+export type AdminTab =
+  | 'persona'
+  | 'events'
+  | 'thoughts'
+  | 'voice'
+  | 'cost'
+  | 'config'

@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import type { AdminTab } from '../types'
 import type {
   ChannelStatus,
+  ConfigGetResponse,
+  ConfigPatchPayload,
+  CostCallRecord,
+  CostFeatureBucket,
+  CostSummaryResponse,
   DaemonState,
   MemoryEvent,
   MemoryThought,
@@ -11,6 +16,9 @@ import type {
   PersonaUpdatePayload,
   PreviewDeleteResponse,
 } from '../api/types'
+import { ApiError } from '../api/types'
+import { getCostRecent, getCostSummary } from '../api/client'
+import { useConfig } from '../hooks/useConfig'
 import { useMemoryEvents } from '../hooks/useMemoryEvents'
 import { useMemoryThoughts } from '../hooks/useMemoryThoughts'
 
@@ -27,6 +35,7 @@ const TABS: { id: AdminTab; label: string; sub: string }[] = [
   { id: 'events', label: '发生过的事', sub: 'events · L3' },
   { id: 'thoughts', label: '长期印象', sub: 'thoughts · L4' },
   { id: 'voice', label: '声音', sub: 'voice toggle' },
+  { id: 'cost', label: '成本', sub: 'cost · 30d' },
   { id: 'config', label: '配置', sub: 'coming soon' },
 ]
 
@@ -82,6 +91,7 @@ export function Admin({
               toggleVoice={toggleVoice}
             />
           )}
+          {tab === 'cost' && <CostTab />}
           {tab === 'config' && <ConfigTab />}
         </main>
       </div>
@@ -643,31 +653,926 @@ function VoiceTab({
 }
 
 // ═══════════════════════════════════════════════════════════
-// Config tab — placeholder, nothing wired up yet
+// Config tab — Worker η · four editable cards wired to PATCH /api/admin/config
 // ═══════════════════════════════════════════════════════════
+//
+// The tab renders 4 cards sharing a compact form style (reuses
+// `.block-editor` / `.admin-section` vocabulary — no new CSS classes):
+//
+//   1. LLM         — provider / model / temperature / max_tokens /
+//                    timeout / api_key_env + green-dot presence check
+//   2. Memory      — retrieve_k slider / relational_bonus_weight /
+//                    recent_window_size
+//   3. Consolidate — 3 integer thresholds
+//   4. System info — read-only: version / uptime / db size / data_dir
+//                    with a "复制路径" button for config.toml
+//
+// Each card has a local draft state + its own save button. The "save"
+// button PATCHes only that card's fields so a save on one card never
+// clobbers pending edits in another. `useConfig.save()` re-reads after
+// a successful PATCH so each card shows server-truth.
 
 function ConfigTab() {
+  const { config, loading, saving, error, lastSaved, save } = useConfig()
+
+  if (loading && config === null) {
+    return (
+      <div className="admin-section">
+        <div className="admin-section-head">
+          <h1 className="admin-section-title">配置</h1>
+          <p className="admin-section-lead">加载中⋯</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (config === null) {
+    return (
+      <div className="admin-section">
+        <div className="admin-section-head">
+          <h1 className="admin-section-title">配置</h1>
+          <p className="admin-section-lead" style={{ color: 'rgba(255,120,120,0.78)' }}>
+            ⚠ {error ?? '无法加载配置'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="admin-section">
       <div className="admin-section-head">
         <div className="admin-section-title-row">
           <h1 className="admin-section-title">配置</h1>
-          <span className="admin-section-engname">coming soon</span>
+          <span className="admin-section-engname">runtime config</span>
         </div>
         <p className="admin-section-lead">
-          LLM provider / model、成本统计、数据目录等高级配置。
+          在这里改的设置会<strong>原子地写回 config.toml</strong>
+          并让 daemon 立即生效，不用重启。数据目录 / 数据库路径这类结构性字段不可在线改动。
         </p>
       </div>
 
-      <div className="voice-empty">
-        <div className="voice-empty-glyph">⚙</div>
-        <div className="voice-empty-title">即将推出:LLM / 成本 / 数据目录管理</div>
-        <p className="voice-empty-desc">
-          目前这些配置只能通过编辑 <code>~/.echovessel</code> 下的配置文件来调。
-          下一版会在这里提供可视化的管理界面，包括切换模型、查看累计花费、
-          以及打开数据目录。
-        </p>
+      {error !== null && (
+        <div
+          className="admin-hint-card"
+          style={{
+            borderColor: 'rgba(255, 100, 100, 0.35)',
+            background: 'rgba(255, 80, 80, 0.08)',
+          }}
+        >
+          <div className="admin-hint-glyph">⚠</div>
+          <div className="admin-hint-body">
+            <div className="admin-hint-title">保存失败</div>
+            <div className="admin-hint-desc">{error}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="admin-blocks">
+        <ConfigLlmCard config={config} saving={saving} save={save} lastSaved={lastSaved} />
+        <ConfigMemoryCard config={config} saving={saving} save={save} lastSaved={lastSaved} />
+        <ConfigConsolidateCard config={config} saving={saving} save={save} lastSaved={lastSaved} />
+        <ConfigSystemCard config={config} />
       </div>
     </div>
   )
+}
+
+// ─── Card 1 · LLM ───────────────────────────────────────────────────
+
+interface ConfigCardProps {
+  config: ConfigGetResponse
+  saving: boolean
+  save: (patch: ConfigPatchPayload) => Promise<void>
+  lastSaved: number | null
+}
+
+function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
+  const [provider, setProvider] = useState(config.llm.provider)
+  const [model, setModel] = useState(config.llm.model ?? '')
+  const [temperature, setTemperature] = useState(config.llm.temperature)
+  const [maxTokens, setMaxTokens] = useState(config.llm.max_tokens)
+  const [timeout, setTimeout] = useState(config.llm.timeout_seconds)
+
+  // Re-sync local state when the upstream `config` snapshot changes
+  // (e.g. after a successful save refresh).
+  useEffect(() => {
+    setProvider(config.llm.provider)
+    setModel(config.llm.model ?? '')
+    setTemperature(config.llm.temperature)
+    setMaxTokens(config.llm.max_tokens)
+    setTimeout(config.llm.timeout_seconds)
+  }, [config.llm])
+
+  const dirty =
+    provider !== config.llm.provider ||
+    model !== (config.llm.model ?? '') ||
+    temperature !== config.llm.temperature ||
+    maxTokens !== config.llm.max_tokens ||
+    timeout !== config.llm.timeout_seconds
+
+  const handleSave = () => {
+    const patch: ConfigPatchPayload = { llm: {} }
+    if (provider !== config.llm.provider) patch.llm!.provider = provider
+    if (model !== (config.llm.model ?? '')) patch.llm!.model = model
+    if (temperature !== config.llm.temperature)
+      patch.llm!.temperature = temperature
+    if (maxTokens !== config.llm.max_tokens) patch.llm!.max_tokens = maxTokens
+    if (timeout !== config.llm.timeout_seconds)
+      patch.llm!.timeout_seconds = timeout
+    void save(patch).catch(() => {
+      /* surfaced via `error` */
+    })
+  }
+
+  const recentlySaved = lastSaved !== null && Date.now() - lastSaved < 3000
+
+  return (
+    <section className="block-editor">
+      <header className="block-editor-head">
+        <div className="block-editor-label-row">
+          <h3 className="block-editor-label">LLM 提供商</h3>
+          <span className="block-editor-engname">llm.*</span>
+        </div>
+        <p className="block-editor-hint">
+          控制 persona 的回复由谁生成。改完<strong>下一条消息</strong>就会用新模型。
+        </p>
+      </header>
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        <FormRow label="provider" sub="openai_compat / anthropic / stub">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            disabled={saving}
+            style={selectStyle}
+          >
+            <option value="openai_compat">openai_compat</option>
+            <option value="anthropic">anthropic</option>
+            <option value="stub">stub</option>
+          </select>
+        </FormRow>
+
+        <FormRow label="model" sub="e.g. gpt-4o-mini / claude-haiku-4-5">
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={saving}
+            style={inputStyle}
+            placeholder="model id"
+          />
+        </FormRow>
+
+        <FormRow
+          label="temperature"
+          sub={`当前 ${temperature.toFixed(2)}   ·  范围 0.00 – 2.00`}
+        >
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={temperature}
+            onChange={(e) => setTemperature(parseFloat(e.target.value))}
+            disabled={saving}
+            style={{ width: '100%' }}
+          />
+        </FormRow>
+
+        <FormRow label="max_tokens" sub="单次回复上限,64 – 32000">
+          <input
+            type="number"
+            min={64}
+            max={32000}
+            step={32}
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(parseInt(e.target.value, 10) || 0)}
+            disabled={saving}
+            style={inputStyle}
+          />
+        </FormRow>
+
+        <FormRow label="timeout_seconds" sub="超时丢弃本次调用,1 – 600">
+          <input
+            type="number"
+            min={1}
+            max={600}
+            value={timeout}
+            onChange={(e) => setTimeout(parseInt(e.target.value, 10) || 0)}
+            disabled={saving}
+            style={inputStyle}
+          />
+        </FormRow>
+
+        <FormRow label="api_key_env" sub="只读 · env var 名字 · 密钥本身在 .env / 系统环境">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 6,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: config.llm.api_key_present
+                  ? 'rgba(120, 255, 180, 0.75)'
+                  : 'rgba(255, 120, 120, 0.7)',
+              }}
+            />
+            <code style={{ flex: 1 }}>{config.llm.api_key_env}</code>
+            <span
+              style={{
+                fontSize: 10,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: config.llm.api_key_present
+                  ? 'rgba(120, 255, 180, 0.8)'
+                  : 'rgba(255, 120, 120, 0.8)',
+              }}
+            >
+              {config.llm.api_key_present ? 'loaded' : 'missing'}
+            </span>
+          </div>
+        </FormRow>
+      </div>
+
+      <div className="block-editor-actions">
+        <div className="block-editor-status">
+          {recentlySaved && (
+            <span className="block-editor-saved">已保存 · 下次 LLM 调用生效 ✓</span>
+          )}
+          {!recentlySaved && dirty && (
+            <span className="block-editor-dirty">有未保存的修改</span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="block-editor-save"
+          disabled={!dirty || saving}
+          onClick={handleSave}
+        >
+          {saving ? '⋯' : '保存'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ─── Card 2 · Memory tuning ─────────────────────────────────────────
+
+function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) {
+  const [retrieveK, setRetrieveK] = useState(config.memory.retrieve_k)
+  const [bonus, setBonus] = useState(config.memory.relational_bonus_weight)
+  const [recent, setRecent] = useState(config.memory.recent_window_size)
+
+  useEffect(() => {
+    setRetrieveK(config.memory.retrieve_k)
+    setBonus(config.memory.relational_bonus_weight)
+    setRecent(config.memory.recent_window_size)
+  }, [config.memory])
+
+  const dirty =
+    retrieveK !== config.memory.retrieve_k ||
+    bonus !== config.memory.relational_bonus_weight ||
+    recent !== config.memory.recent_window_size
+
+  const handleSave = () => {
+    const patch: ConfigPatchPayload = { memory: {} }
+    if (retrieveK !== config.memory.retrieve_k)
+      patch.memory!.retrieve_k = retrieveK
+    if (bonus !== config.memory.relational_bonus_weight)
+      patch.memory!.relational_bonus_weight = bonus
+    if (recent !== config.memory.recent_window_size)
+      patch.memory!.recent_window_size = recent
+    void save(patch).catch(() => {})
+  }
+
+  const recentlySaved = lastSaved !== null && Date.now() - lastSaved < 3000
+
+  return (
+    <section className="block-editor">
+      <header className="block-editor-head">
+        <div className="block-editor-label-row">
+          <h3 className="block-editor-label">记忆调优</h3>
+          <span className="block-editor-engname">memory.*</span>
+        </div>
+        <p className="block-editor-hint">
+          控制每次对话时 persona 调用多少条"发生过的事"和"长期印象"作为上下文。
+        </p>
+      </header>
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        <FormRow label="retrieve_k" sub={`取回 ${retrieveK} 条记忆 · 1 – 30`}>
+          <input
+            type="range"
+            min={1}
+            max={30}
+            step={1}
+            value={retrieveK}
+            onChange={(e) => setRetrieveK(parseInt(e.target.value, 10))}
+            disabled={saving}
+            style={{ width: '100%' }}
+          />
+        </FormRow>
+
+        <FormRow
+          label="relational_bonus_weight"
+          sub={`${bonus.toFixed(2)}   ·  "身边的人"相关记忆的加权系数 · 0.0 – 2.0`}
+        >
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={bonus}
+            onChange={(e) => setBonus(parseFloat(e.target.value))}
+            disabled={saving}
+            style={{ width: '100%' }}
+          />
+        </FormRow>
+
+        <FormRow
+          label="recent_window_size"
+          sub={`${recent} 条最近消息 · 1 – 200`}
+        >
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={recent}
+            onChange={(e) => setRecent(parseInt(e.target.value, 10) || 0)}
+            disabled={saving}
+            style={inputStyle}
+          />
+        </FormRow>
+      </div>
+
+      <div className="block-editor-actions">
+        <div className="block-editor-status">
+          {recentlySaved && (
+            <span className="block-editor-saved">已保存 ✓</span>
+          )}
+          {!recentlySaved && dirty && (
+            <span className="block-editor-dirty">有未保存的修改</span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="block-editor-save"
+          disabled={!dirty || saving}
+          onClick={handleSave}
+        >
+          {saving ? '⋯' : '保存'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ─── Card 3 · Consolidate thresholds ────────────────────────────────
+
+function ConfigConsolidateCard({
+  config,
+  saving,
+  save,
+  lastSaved,
+}: ConfigCardProps) {
+  const [trivMsg, setTrivMsg] = useState(config.consolidate.trivial_message_count)
+  const [trivTok, setTrivTok] = useState(config.consolidate.trivial_token_count)
+  const [reflGate, setReflGate] = useState(
+    config.consolidate.reflection_hard_gate_24h,
+  )
+
+  useEffect(() => {
+    setTrivMsg(config.consolidate.trivial_message_count)
+    setTrivTok(config.consolidate.trivial_token_count)
+    setReflGate(config.consolidate.reflection_hard_gate_24h)
+  }, [config.consolidate])
+
+  const dirty =
+    trivMsg !== config.consolidate.trivial_message_count ||
+    trivTok !== config.consolidate.trivial_token_count ||
+    reflGate !== config.consolidate.reflection_hard_gate_24h
+
+  const handleSave = () => {
+    const patch: ConfigPatchPayload = { consolidate: {} }
+    if (trivMsg !== config.consolidate.trivial_message_count)
+      patch.consolidate!.trivial_message_count = trivMsg
+    if (trivTok !== config.consolidate.trivial_token_count)
+      patch.consolidate!.trivial_token_count = trivTok
+    if (reflGate !== config.consolidate.reflection_hard_gate_24h)
+      patch.consolidate!.reflection_hard_gate_24h = reflGate
+    void save(patch).catch(() => {})
+  }
+
+  const recentlySaved = lastSaved !== null && Date.now() - lastSaved < 3000
+
+  return (
+    <section className="block-editor">
+      <header className="block-editor-head">
+        <div className="block-editor-label-row">
+          <h3 className="block-editor-label">记忆整合阈值</h3>
+          <span className="block-editor-engname">consolidate.*</span>
+        </div>
+        <p className="block-editor-hint">
+          控制哪些对话被当作"琐碎"直接跳过,哪些才进事件提取 / 反思管线。
+        </p>
+      </header>
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        <FormRow
+          label="trivial_message_count"
+          sub="消息条数低于此值的 session 直接跳过提取"
+        >
+          <input
+            type="number"
+            min={0}
+            max={50}
+            value={trivMsg}
+            onChange={(e) => setTrivMsg(parseInt(e.target.value, 10) || 0)}
+            disabled={saving}
+            style={inputStyle}
+          />
+        </FormRow>
+
+        <FormRow
+          label="trivial_token_count"
+          sub="token 数低于此值的 session 直接跳过提取"
+        >
+          <input
+            type="number"
+            min={0}
+            max={5000}
+            step={10}
+            value={trivTok}
+            onChange={(e) => setTrivTok(parseInt(e.target.value, 10) || 0)}
+            disabled={saving}
+            style={inputStyle}
+          />
+        </FormRow>
+
+        <FormRow
+          label="reflection_hard_gate_24h"
+          sub="24h 内最多做多少次反思 · 保护 LLM 预算"
+        >
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={reflGate}
+            onChange={(e) => setReflGate(parseInt(e.target.value, 10) || 0)}
+            disabled={saving}
+            style={inputStyle}
+          />
+        </FormRow>
+      </div>
+
+      <div className="block-editor-actions">
+        <div className="block-editor-status">
+          {recentlySaved && (
+            <span className="block-editor-saved">已保存 ✓</span>
+          )}
+          {!recentlySaved && dirty && (
+            <span className="block-editor-dirty">有未保存的修改</span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="block-editor-save"
+          disabled={!dirty || saving}
+          onClick={handleSave}
+        >
+          {saving ? '⋯' : '保存'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ─── Card 4 · System info (read-only) ──────────────────────────────
+
+function ConfigSystemCard({ config }: { config: ConfigGetResponse }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(config.system.config_path ?? '')
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // noop — some browsers refuse clipboard writes without permission
+    }
+  }
+
+  return (
+    <section className="block-editor">
+      <header className="block-editor-head">
+        <div className="block-editor-label-row">
+          <h3 className="block-editor-label">系统信息</h3>
+          <span className="block-editor-engname">read-only</span>
+        </div>
+        <p className="block-editor-hint">
+          以下字段不可在线改 —— <strong>data_dir</strong> 和 <strong>db_path</strong> 决定数据库文件位置,
+          改动需要停 daemon,手动编辑 config.toml,再重启。
+        </p>
+      </header>
+
+      <dl
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr',
+          gap: '8px 18px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 12,
+          color: 'var(--cream-dim)',
+          marginBottom: 16,
+        }}
+      >
+        <dt style={sysInfoDt}>version</dt>
+        <dd style={sysInfoDd}>{config.system.version}</dd>
+        <dt style={sysInfoDt}>uptime</dt>
+        <dd style={sysInfoDd}>{formatUptime(config.system.uptime_seconds)}</dd>
+        <dt style={sysInfoDt}>data_dir</dt>
+        <dd style={sysInfoDd}><code>{config.system.data_dir}</code></dd>
+        <dt style={sysInfoDt}>db_path</dt>
+        <dd style={sysInfoDd}>
+          <code>{config.system.db_path}</code> · {formatBytes(config.system.db_size_bytes)}
+        </dd>
+        <dt style={sysInfoDt}>config.toml</dt>
+        <dd style={sysInfoDd}>
+          <code>{config.system.config_path ?? '(无文件)'}</code>
+        </dd>
+      </dl>
+
+      <div className="block-editor-actions">
+        <div className="block-editor-status">
+          {copied && <span className="block-editor-saved">已复制路径 ✓</span>}
+        </div>
+        <button
+          type="button"
+          className="block-editor-save"
+          onClick={() => void handleCopy()}
+          disabled={config.system.config_path === null}
+        >
+          复制 config.toml 路径
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ─── Shared helpers ────────────────────────────────────────────────
+
+function FormRow({
+  label,
+  sub,
+  children,
+}: {
+  label: string
+  sub: string
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          marginBottom: 6,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          letterSpacing: '0.06em',
+          color: 'var(--cream-soft)',
+        }}
+      >
+        <span style={{ color: 'var(--cream)' }}>{label}</span>
+        <span style={{ fontSize: 10, fontStyle: 'italic' }}>{sub}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '8px 10px',
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 6,
+  color: 'var(--cream)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 13,
+  outline: 'none',
+}
+
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  appearance: 'none',
+  cursor: 'pointer',
+}
+
+const sysInfoDt: React.CSSProperties = {
+  color: 'var(--cream-soft)',
+  textTransform: 'uppercase',
+  fontSize: 10,
+  letterSpacing: '0.14em',
+  alignSelf: 'baseline',
+}
+
+const sysInfoDd: React.CSSProperties = {
+  margin: 0,
+  color: 'var(--cream)',
+  wordBreak: 'break-all',
+}
+
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  return `${h}h ${m}m`
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(2)} MB`
+}
+
+// ═══════════════════════════════════════════════════════════
+// Cost tab — LLM spend by feature / time (Worker ζ)
+// ═══════════════════════════════════════════════════════════
+
+function CostTab() {
+  // Fetch the three windows in parallel so the three summary cards
+  // are independent — if one fails the others still render.
+  const today = useCostSummary('today')
+  const week = useCostSummary('7d')
+  const month = useCostSummary('30d')
+  const recent = useCostRecent(20)
+
+  const anyLoading =
+    today.loading || week.loading || month.loading || recent.loading
+  const error = today.error || week.error || month.error || recent.error
+
+  const monthSummary = month.data
+  const noCalls =
+    monthSummary !== null && monthSummary.total_tokens === 0 && !anyLoading
+
+  return (
+    <div className="admin-section">
+      <div className="admin-section-head">
+        <div className="admin-section-title-row">
+          <h1 className="admin-section-title">成本</h1>
+          <span className="admin-section-engname">cost · 30d window</span>
+        </div>
+        <p className="admin-section-lead">
+          每次 LLM 调用都记一笔。下面是按时间窗口和功能拆分的估算花销 —
+          权威账单仍在 provider 控制台。
+        </p>
+      </div>
+
+      {error && <div className="admin-error-banner">{error}</div>}
+
+      <div className="cost-cards">
+        <CostSummaryCard
+          label="今天"
+          windowSub="today"
+          summary={today.data}
+          loading={today.loading}
+        />
+        <CostSummaryCard
+          label="近 7 天"
+          windowSub="7d"
+          summary={week.data}
+          loading={week.loading}
+        />
+        <CostSummaryCard
+          label="近 30 天"
+          windowSub="30d"
+          summary={month.data}
+          loading={month.loading}
+        />
+      </div>
+
+      {noCalls ? (
+        <div className="memory-list-empty">
+          <div className="memory-list-empty-glyph">💸</div>
+          <div className="memory-list-empty-title">还没有 LLM 调用</div>
+          <p className="memory-list-empty-desc">
+            和 persona 聊几轮 / 跑一次导入,就会出现 chat / consolidate /
+            import 各项的花销分布。
+          </p>
+        </div>
+      ) : (
+        <>
+          {monthSummary && (
+            <CostByFeatureSection summary={monthSummary} />
+          )}
+          {recent.data && recent.data.items.length > 0 && (
+            <CostRecentSection items={recent.data.items} />
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+interface UseCostSummaryResult {
+  data: CostSummaryResponse | null
+  loading: boolean
+  error: string | null
+}
+
+function useCostSummary(
+  range: 'today' | '7d' | '30d',
+): UseCostSummaryResult {
+  const [data, setData] = useState<CostSummaryResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    getCostSummary(range)
+      .then((r) => {
+        if (!cancelled) setData(r)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (err instanceof ApiError) setError(err.detail)
+        else if (err instanceof Error) setError(err.message)
+        else setError('unknown error')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [range])
+  return { data, loading, error }
+}
+
+interface UseCostRecentResult {
+  data: { limit: number; items: CostCallRecord[] } | null
+  loading: boolean
+  error: string | null
+}
+
+function useCostRecent(limit: number): UseCostRecentResult {
+  const [data, setData] = useState<{
+    limit: number
+    items: CostCallRecord[]
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    getCostRecent(limit)
+      .then((r) => {
+        if (!cancelled) setData(r)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (err instanceof ApiError) setError(err.detail)
+        else if (err instanceof Error) setError(err.message)
+        else setError('unknown error')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [limit])
+  return { data, loading, error }
+}
+
+function CostSummaryCard({
+  label,
+  windowSub,
+  summary,
+  loading,
+}: {
+  label: string
+  windowSub: string
+  summary: CostSummaryResponse | null
+  loading: boolean
+}) {
+  return (
+    <div className="cost-card">
+      <div className="cost-card-label">{label}</div>
+      <div className="cost-card-engname">{windowSub}</div>
+      {loading || summary === null ? (
+        <div className="cost-card-loading">…</div>
+      ) : (
+        <>
+          <div className="cost-card-value">${summary.total_usd.toFixed(4)}</div>
+          <div className="cost-card-tokens">
+            {summary.total_tokens.toLocaleString()} tokens
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function CostByFeatureSection({ summary }: { summary: CostSummaryResponse }) {
+  const buckets = Object.entries(summary.by_feature) as [
+    string,
+    CostFeatureBucket,
+  ][]
+  if (buckets.length === 0) return null
+  const max = Math.max(...buckets.map(([, b]) => b.cost_usd), 0.000001)
+  buckets.sort(([, a], [, b]) => b.cost_usd - a.cost_usd)
+
+  return (
+    <div className="cost-by-feature">
+      <h2 className="cost-section-title">按功能拆分（30 天）</h2>
+      <ul className="cost-bar-list">
+        {buckets.map(([feature, b]) => {
+          const pct = max === 0 ? 0 : Math.round((b.cost_usd / max) * 100)
+          return (
+            <li key={feature} className="cost-bar-row">
+              <div className="cost-bar-head">
+                <span className="cost-bar-label">{labelForFeature(feature)}</span>
+                <span className="cost-bar-amount">
+                  ${b.cost_usd.toFixed(4)} · {b.calls} call{b.calls === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="cost-bar-track">
+                <div
+                  className="cost-bar-fill"
+                  style={{ width: `${pct}%` }}
+                  aria-label={`${feature} ${pct}%`}
+                />
+              </div>
+              <div className="cost-bar-meta">
+                {b.tokens_in.toLocaleString()} in ·{' '}
+                {b.tokens_out.toLocaleString()} out
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function CostRecentSection({ items }: { items: CostCallRecord[] }) {
+  return (
+    <div className="cost-recent">
+      <h2 className="cost-section-title">最近 LLM 调用</h2>
+      <ul className="cost-recent-list">
+        {items.map((it) => (
+          <li key={it.id} className="cost-recent-row">
+            <span className="cost-recent-time">
+              {formatTimestamp(it.timestamp)}
+            </span>
+            <span className="cost-recent-feature">{labelForFeature(it.feature)}</span>
+            <span className="cost-recent-model">
+              {it.provider}/{it.model}
+            </span>
+            <span className="cost-recent-tokens">
+              {(it.tokens_in + it.tokens_out).toLocaleString()} tok
+            </span>
+            <span className="cost-recent-cost">
+              ${it.cost_usd.toFixed(4)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function labelForFeature(feature: string): string {
+  switch (feature) {
+    case 'chat':
+      return '对话'
+    case 'import':
+      return '导入'
+    case 'consolidate':
+      return '整理'
+    case 'reflection':
+      return '反思'
+    case 'proactive':
+      return '主动'
+    default:
+      return feature
+  }
 }

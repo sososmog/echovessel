@@ -353,6 +353,65 @@ export interface DeleteResponse {
   choice: DeleteChoice
 }
 
+// ─── HTTP · GET /api/admin/cost/* ───────────────────────────────────────
+
+/** Five canonical feature labels recorded by the cost logger.
+ *  Mirror of ``echovessel.runtime.cost_logger.Feature`` Literal. */
+export type CostFeature =
+  | 'chat'
+  | 'import'
+  | 'consolidate'
+  | 'reflection'
+  | 'proactive'
+  | 'unknown'
+
+/** Per-feature aggregated bucket inside ``CostSummaryResponse.by_feature``. */
+export interface CostFeatureBucket {
+  calls: number
+  tokens_in: number
+  tokens_out: number
+  cost_usd: number
+}
+
+/** One day's roll-up inside ``CostSummaryResponse.by_day``. */
+export interface CostDayBucket {
+  date: string  // YYYY-MM-DD
+  usd: number
+  tokens: number
+  calls: number
+}
+
+/** Response from ``GET /api/admin/cost/summary?range=today|7d|30d``. */
+export interface CostSummaryResponse {
+  range: 'today' | '7d' | '30d'
+  since: string  // ISO 8601
+  total_usd: number
+  total_tokens: number
+  total_tokens_in: number
+  total_tokens_out: number
+  by_feature: Record<string, CostFeatureBucket>
+  by_day: CostDayBucket[]
+}
+
+/** Single LLM call row returned by ``GET /api/admin/cost/recent``. */
+export interface CostCallRecord {
+  id: number
+  timestamp: string  // ISO 8601
+  provider: string
+  model: string
+  feature: string
+  tier: string
+  tokens_in: number
+  tokens_out: number
+  cost_usd: number
+  turn_id: string | null
+}
+
+export interface CostRecentResponse {
+  limit: number
+  items: CostCallRecord[]
+}
+
 // ─── HTTP · POST /api/admin/import/* ─────────────────────────────────────
 
 /**
@@ -485,6 +544,96 @@ export interface ImportDoneSummary {
 export interface ImportProgressSnapshot {
   current_chunk: number
   total_chunks: number
+}
+
+// ─── HTTP · GET/PATCH /api/admin/config ──────────────────────────────────
+
+/**
+ * Safe subset of the daemon's live config returned by
+ * GET /api/admin/config. Secrets are NEVER included — the LLM section
+ * only reports `api_key_present: boolean` to let the UI render a
+ * "🟢 key loaded" / "🔴 missing" status dot without ever shipping the
+ * key material to the browser.
+ */
+export interface ConfigLlmSection {
+  provider: string
+  model: string | null
+  api_key_env: string
+  timeout_seconds: number
+  temperature: number
+  max_tokens: number
+  api_key_present: boolean
+}
+
+export interface ConfigPersonaSection {
+  display_name: string
+  voice_enabled: boolean
+  voice_id: string | null
+}
+
+export interface ConfigMemorySection {
+  retrieve_k: number
+  relational_bonus_weight: number
+  recent_window_size: number
+}
+
+export interface ConfigConsolidateSection {
+  trivial_message_count: number
+  trivial_token_count: number
+  reflection_hard_gate_24h: number
+}
+
+export interface ConfigSystemSection {
+  data_dir: string
+  db_path: string
+  version: string
+  uptime_seconds: number
+  db_size_bytes: number
+  config_path: string | null
+}
+
+export interface ConfigGetResponse {
+  llm: ConfigLlmSection
+  persona: ConfigPersonaSection
+  memory: ConfigMemorySection
+  consolidate: ConfigConsolidateSection
+  system: ConfigSystemSection
+}
+
+/**
+ * PATCH payload is a nested `{section: {field: value}}` dict. All
+ * fields optional — server applies only what's present. Sending a
+ * restart-required key (e.g. `memory.db_path`) yields 400; invalid
+ * values (e.g. `llm.temperature: 5.0`) yield 422.
+ */
+export interface ConfigPatchPayload {
+  llm?: Partial<{
+    provider: string
+    model: string
+    api_key_env: string
+    timeout_seconds: number
+    temperature: number
+    max_tokens: number
+  }>
+  persona?: Partial<{
+    display_name: string
+  }>
+  memory?: Partial<{
+    retrieve_k: number
+    relational_bonus_weight: number
+    recent_window_size: number
+  }>
+  consolidate?: Partial<{
+    trivial_message_count: number
+    trivial_token_count: number
+    reflection_hard_gate_24h: number
+  }>
+}
+
+export interface ConfigPatchResponse {
+  updated_fields: string[]
+  reload_triggered: boolean
+  restart_required: string[]
 }
 
 // ─── Error class ─────────────────────────────────────────────────────────
