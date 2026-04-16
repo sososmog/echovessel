@@ -26,11 +26,11 @@ uv run echovessel run          # opens http://localhost:7777/ on first boot
 
 ## Architecture at a glance
 
-> 🗺 **Full one-page visual tour**: [`../architecture.html`](../architecture.html) — open in a browser to get module layers, memory L1-L4 stack, message flow, cross-channel SSE mirror, full HTTP surface, iron rules, and release timeline on a single scrollable page.
+> 🗺 **Full one-page visual tour**: [`architecture.html`](https://alanyian.com/projects/echovessel/docs/architecture.html) — open in a browser to get module layers, memory L1-L4 stack, message flow, cross-channel SSE mirror, full HTTP surface, iron rules, and release timeline on a single scrollable page.
 >
-> 🧠 **Memory in one diagram**: [`../memory/layers.html`](../memory/layers.html) — the simplest possible view of L1→L4 · four layers · how they connect · write / distill / read modes · credits the Stanford Generative Agents paper for the scoring formula.
+> 🧠 **Memory in one diagram**: [`memory/layers.html`](https://alanyian.com/projects/echovessel/docs/memory/layers.html) — the simplest possible view of L1→L4 · four layers · how they connect · write / distill / read modes · credits the Stanford Generative Agents paper for the scoring formula.
 >
-> 🔄 **Runtime flows / "how layers wake up"**: [`../architecture-flow.html`](../architecture-flow.html) — companion page focused on per-turn activation sequence, real story trace ("I got a cat named 小黑"), retrieval ranking, policy gates, and SSE nervous-system events.
+> 🔄 **Runtime flows / "how layers wake up"**: [`architecture-flow.html`](https://alanyian.com/projects/echovessel/docs/architecture-flow.html) — companion page focused on per-turn activation sequence, real story trace ("I got a cat named 小黑"), retrieval ranking, policy gates, and SSE nervous-system events.
 
 ```
 ┌───────────────────────────────────────────────────────┐

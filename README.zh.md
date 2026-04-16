@@ -57,9 +57,9 @@ uv sync --extra embeddings --extra llm --extra voice --extra discord
 
 跑任何东西之前 · 先花 5 分钟扫一下整体结构 · 后面各种配置就都有位置感。`docs/` 下有三份手写的 HTML 可视化 · 浏览器直接打开:
 
-- 🗺 [**`docs/architecture.html`**](./docs/architecture.html) · 一页静态 anatomy。模块分层 / Memory L1–L4 堆栈 / 消息流程 / 跨 channel SSE / 完整 HTTP 接口 / 铁律 / 发布时间线。
-- 🧠 [**`docs/memory/layers.html`**](./docs/memory/layers.html) · 记忆系统最简心智模型。一张 SVG · 4 层 · 如何连接 · 附 Stanford Generative Agents 打分公式的致敬说明。
-- 🔄 [**`docs/architecture-flow.html`**](./docs/architecture-flow.html) · 运行时"神经系统"配套页。单 turn 逐步唤醒 · 真实 story trace · L1–L4 提炼规则(引用真实 extraction / reflection prompt)· 检索数学 · 策略门禁。
+- 🗺 [**`docs/architecture.html`**](https://alanyian.com/projects/echovessel/docs/architecture.html) · 一页静态 anatomy。模块分层 / Memory L1–L4 堆栈 / 消息流程 / 跨 channel SSE / 完整 HTTP 接口 / 铁律 / 发布时间线。
+- 🧠 [**`docs/memory/layers.html`**](https://alanyian.com/projects/echovessel/docs/memory/layers.html) · 记忆系统最简心智模型。一张 SVG · 4 层 · 如何连接 · 附 Stanford Generative Agents 打分公式的致敬说明。
+- 🔄 [**`docs/architecture-flow.html`**](https://alanyian.com/projects/echovessel/docs/architecture-flow.html) · 运行时"神经系统"配套页。单 turn 逐步唤醒 · 真实 story trace · L1–L4 提炼规则(引用真实 extraction / reflection prompt)· 检索数学 · 策略门禁。
 
 只有 60 秒就开中间那张。
 
