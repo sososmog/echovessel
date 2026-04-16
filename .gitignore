@@ -1,0 +1,84 @@
+# EchoVessel .gitignore
+
+# --- Private / internal ----------------------------------------------------
+# develop-docs/ holds the complete internal development history — spec
+# versions, round trackers, review decisions, ERRATUM notices, eval-runs
+# snapshots, handoff documents. This tree is intentionally kept out of the
+# public repository; the distilled external-facing docs live under `docs/`.
+develop-docs/
+
+# references/ holds third-party projects the team studied during design
+# (airi, generative_agents, letta, etc). Not distributed because of
+# licensing and because they're not part of EchoVessel itself.
+references/
+
+# PROJECT_TRACKER.md is the internal project battle map — lists AI
+# development threads, module implementation trackers, unpublished
+# planning notes. Not for the public repo.
+PROJECT_TRACKER.md
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+.installed.cfg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# --- uv --------------------------------------------------------------------
+.uv-cache/
+
+# --- Testing / linting -----------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# --- Frontend --------------------------------------------------------------
+src/echovessel/channels/web/frontend/node_modules/
+src/echovessel/channels/web/frontend/dist/
+src/echovessel/channels/web/frontend/.vite/
+src/echovessel/channels/web/static/*
+!src/echovessel/channels/web/static/.gitkeep
+
+# --- IDE / OS --------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Secrets / local config ------------------------------------------------
+# Any stray .env at repo root is a developer convenience file and MUST NOT
+# be committed. The daemon reads ~/.echovessel/.env, never one in the repo.
+.env
+.env.*
+!.env.example
+
+# --- Local tooling state ---------------------------------------------------
+.claude/
+.aider*
+.cursor/
+
+# --- Logs / local data -----------------------------------------------------
+*.log
+*.sqlite
+*.sqlite-journal
+*.db

@@ -1,0 +1,194 @@
+# 配置(Configuration)
+
+EchoVessel 的所有运行时状态都从一份 TOML 配置文件读入。本页是每个字段的查表:作用、合法取值、何时改。
+
+## 文件位置和格式
+
+Daemon 默认读取 `~/.echovessel/config.toml`。起步模板打包在安装包内 `echovessel/resources/config.toml.sample`，用 `init` 子命令一键生成工作副本:
+
+```bash
+echovessel init
+```
+
+这会把 sample 写到 `~/.echovessel/config.toml`。传 `--force` 覆盖现有文件,传 `--config-path PATH` 指定其他位置。无论 source checkout 还是 wheel 安装,`init` 都通过 `importlib.resources` 读 sample,不走文件系统路径。
+
+文件用的是标准 TOML 语法,有一条 EchoVessel 特有的约定:**以 `_env` 结尾的字段存的是环境变量名,而不是 secret 本身**。Daemon 在启动时从环境里读出实际值。这样 API key、bot token、provider 凭据就不会落在任何可能被复制粘贴或被不小心 commit 进版本控制的文件里。如果你写 `api_key_env = "OPENAI_API_KEY"`,daemon 在构造 LLM provider 时会读 `os.environ["OPENAI_API_KEY"]`。
+
+Daemon 只在启动时 load 一次 `config.toml`。对大多数 section 的修改只有下次启动才会生效。少数 section 可以通过给运行中的 daemon 发 `SIGHUP` 做热重载——本页末尾有一张表。像切换 `persona.voice_enabled` 这类管理操作不走 TOML 路径,它们有专用 API,能原子地把相关字段写回文件并同步更新进程内状态。
+
+## `[runtime]`
+
+Daemon 自身的进程级设置。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `data_dir` | `~/.echovessel` | 一切都落在这里:数据库、日志、语音缓存、克隆指纹缓存。设成绝对路径时,该路径必须对运行 daemon 的用户可写。 |
+| `log_level` | `"info"` | `"debug"` / `"info"` / `"warn"` / `"error"` 之一。`"debug"` 非常啰嗦,会打印每一条 LLM prompt——只在追 bug 时才用。 |
+
+## `[persona]`
+
+这个 daemon 实例服务的单个 persona 的身份字段。Phase 1 每个 daemon 进程只支持一个 persona。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `id` | `"default"` | memory 表里作为主键用的短稳定标识符。只在首次启动前改——一旦数据库里有以这个 id 为 key 的行,改它就会让所有东西变成孤儿。 |
+| `display_name` | `"Your Companion"` | persona 在 prompt 和 UI 里对自己的称呼。两次启动之间改这个不需要做数据迁移。 |
+| `voice_id` | 未设置 | 从一次语音克隆跑出来的 reference-model id。不设就是 persona 没有语音。 |
+| `voice_provider` | 未设置 | 通常用不着——provider 从 `[voice]` section 推断出来。 |
+| `voice_enabled` | `false` | persona 回复是否除了文字还附带语音。这个字段**不是**通过直接改 TOML 文件来切换的;它有专用的管理 API,能原子地重写文件并同步更新运行中的 daemon。直接改文件再重启也能生效,但两条路径不应该混用。 |
+
+## `[memory]`
+
+Memory 模块的存储和检索旋钮。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `db_path` | `"memory.db"` | SQLite 文件路径。相对路径基于 `data_dir`。特殊值 `":memory:"` 跑在进程内内存数据库里,shutdown 后一切消失——适合测试和本地实验。 |
+| `embedder` | `"all-MiniLM-L6-v2"` | sentence-transformers 模型名。Daemon 首次启动时下载(~90 MB),缓存到 `data_dir/embedder.cache/`。如果改这个,也要连带把数据库删掉——已有 embedding 是旧模型产出的,和新模型不可比。 |
+| `retrieve_k` | `10` | retrieve 管道给 prompt 组装器返回的 memory 命中数。值越高 persona 上下文越多,但 token 成本也涨。 |
+| `relational_bonus_weight` | `1.0` | rerank 打分器里"关系加成"项的乘数。调高能让 persona 更倾向召回涉及用户命名关系的记忆。 |
+| `recent_window_size` | `20` | prompt 组装器无条件带上的最近 L2 消息数——不受 retrieve 结果影响。 |
+
+## `[llm]`
+
+哪个模型驱动 persona,以及怎么和它说话。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `provider` | `"openai_compat"` | `"openai_compat"` / `"anthropic"` / `"stub"` 之一。`openai_compat` 覆盖任何 OpenAI 兼容端点——实际上 OpenAI 本身 / OpenRouter / Ollama / LM Studio / vLLM / DeepSeek / Groq / Together / Fireworks / xAI / Perplexity / Moonshot / 智谱 GLM 都算。`anthropic` 用 Anthropic 原生 SDK。`stub` 返回固定回复、零网络调用——是验证干净安装最省心的方式。 |
+| `api_key_env` | `"OPENAI_API_KEY"` | 存 API key 的环境变量名。对不需要认证的 provider(比如本地 Ollama)设为 `""`。 |
+| `base_url` | 未设置 | 覆盖 API base URL。任何非 OpenAI 官方的 `openai_compat` provider 都必须设。 |
+| `model` | 未设置 | 把所有 tier 固定到同一个模型。优先级高于 `tier_models`。 |
+| `max_tokens` | `1024` | 回复长度上限。 |
+| `temperature` | `0.7` | sampling 温度。 |
+| `timeout_seconds` | `60` | 请求超时。 |
+
+### `[llm.tier_models]`
+
+EchoVessel 把 LLM 调用按语义分三档——`small` / `medium` / `large`——让你把每档映射到不同的具体模型。Extraction 和 reflection 走 `small`(跑得频繁,对模型要求低),judge 走 `medium`,persona 实时回复和 proactive 生成走 `large`。
+
+```toml
+[llm.tier_models]
+small  = "gpt-4o-mini"
+medium = "gpt-4o"
+large  = "gpt-4o"
+```
+
+如果设了 `model`,它压过所有 tier,`tier_models` 被忽略。两者都没设的话,provider 用自己的默认(比如 Anthropic provider 默认走 `haiku` / `sonnet` / `opus`)。
+
+### 常见 `[llm]` 配方
+
+**零配置 OpenAI** — 在 shell 里设 `OPENAI_API_KEY`,section 保持默认。
+
+**本地 Ollama** — 不需要 key:
+
+```toml
+[llm]
+provider    = "openai_compat"
+base_url    = "http://localhost:11434/v1"
+api_key_env = ""
+
+[llm.tier_models]
+small  = "llama3:8b"
+medium = "llama3:70b"
+large  = "llama3:70b"
+```
+
+**OpenRouter** — 一个账号任意模型:
+
+```toml
+[llm]
+provider    = "openai_compat"
+base_url    = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model       = "anthropic/claude-sonnet-4"
+```
+
+**Anthropic native** — 用一方 SDK 而不是 OpenAI 线协议:
+
+```toml
+[llm]
+provider    = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+```
+
+**离线烟测** — stub provider · 零网络 · 固定回复。这是验证新安装前最安全的配法:
+
+```toml
+[llm]
+provider    = "stub"
+api_key_env = ""
+```
+
+## `[consolidate]`
+
+控制从已关闭 session 里抽取 event 和 thought 的后台 worker。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `trivial_message_count` | `3` | 消息数少于这个数的 session 被跳过——材料不够抽。 |
+| `trivial_token_count` | `200` | token 数低于这个的 session 也被跳过,原因同上。 |
+| `reflection_hard_gate_24h` | `3` | 任何滚动 24 小时窗口里允许的最大反思(L4 thought 写入)次数。反思是系统里最贵的调用,这个 gate 防止用户突然产出大量 session 时成本失控。 |
+| `worker_poll_seconds` | `5` | 多久扫一次已关闭的 session。值小反应快但更多数据库压力。 |
+| `worker_max_retries` | `3` | 瞬时失败的每 session 重试次数,之后标记失败等人工处理。 |
+
+## `[idle_scanner]`
+
+空闲扫描器负责关闭陈旧的 open session,让 memory 可以去 consolidate 它们。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `interval_seconds` | `60` | 扫描频率。30 分钟没收到消息的 session 会在下次扫描时关掉;这个 30 分钟阈值是代码常量,不是 config 字段。 |
+
+## `[proactive]`
+
+自主消息引擎。完整设计见 `proactive.md`。字段名和默认值在各版本之间保持稳定,集合会随新 policy gate 落地而增长。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 主开关。false 时 scheduler 根本不构造,proactive 不跑。等你确认 daemon 不会瞎发之后再开。 |
+| `tick_interval_seconds` | `60` | scheduler 多久醒一次来评估 policy 队列。 |
+| `max_per_24h` | 视情况 | 粗粒度 rate-limit 上限。完整 policy gate 字段见 `proactive.md`。 |
+
+## `[voice]`
+
+voice 模块开关。整个 section 缺失或 `enabled = false` 时,daemon 启动时不构造 `VoiceService`,runtime 和 channel 侧任何语音路径都干净降级为纯文字。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 主开关。 |
+| `tts_provider` | `"stub"` | `"stub"` / `"fishaudio"` 之一。 |
+| `stt_provider` | `"stub"` | `"stub"` / `"whisper_api"` 之一。 |
+| `fishaudio_api_key_env` | 未设置 | FishAudio API key 的环境变量名。 |
+| `whisper_api_key_env` | 未设置 | Whisper provider 用的 OpenAI API key 环境变量——通常和 `[llm].api_key_env` 是同一个。 |
+
+## `[channels.*]`
+
+每个 transport 一个子 section。Phase 1 只发 Web channel;Discord / iMessage / WeChat 有占位 section 让你看到它们将来住在哪儿。
+
+### `[channels.web]`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | 是否启动这个 channel。 |
+| `channel_id` | `"web"` | 内部用作存储消息时 via-tag 的稳定标识符。改它通常是个错误。 |
+| `host` | `"127.0.0.1"` | 监听 host。除非你明确要远程访问,否则保持在 `127.0.0.1`——daemon 没有鉴权。 |
+| `port` | `7777` | 监听端口。 |
+| `static_dir` | `"embedded"` | 构建好的前端在哪。`"embedded"` 用 wheel 自带的静态文件;绝对路径允许你开发时 serve 自己的 build。 |
+
+### `[channels.discord]` / `[channels.imessage]` / `[channels.wechat]`
+
+模板里这几个 section 是占位。目前只读 `enabled` 和 `channel_id`,对它们设 `enabled = true` 不会真的起一个 channel。真实的 adapter 在后续版本落地。
+
+## `SIGHUP` 能重载什么,什么要重启
+
+给运行中的 daemon 发 `SIGHUP` 会从磁盘重建一小部分运行时状态。其他所有东西都需要完整重启。
+
+| Section | SIGHUP 重载? |
+| --- | --- |
+| `[llm]` | **可以**。新 provider 被构造并换进 `ctx.llm`。in-flight 的 turn 继续用老的 provider 直到跑完。 |
+| `[persona].voice_enabled` | **不可以**——由专用管理 API 管,不走 TOML reload。改文件后发 SIGHUP 不会拾起这里的改动。 |
+| `[voice]` / `[proactive]` / `[consolidate]` / `[idle_scanner]` | **不可以**。这些 section 在 `Runtime.build()` 时被消费一次,驱动的构造器不会在进程中途重建。改完要重启。 |
+| `[channels.*]` | **不可以**。channel 的注册和启动只发生在启动时。 |
+
+拿不准时就重启。SIGHUP 是为唯一一个改动频繁到需要热重载的字段——LLM provider——提供的便利,不是通用的重新配置通道。

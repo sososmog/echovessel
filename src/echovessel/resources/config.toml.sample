@@ -1,0 +1,109 @@
+# EchoVessel — example local configuration.
+# Copy this file to ~/.echovessel/config.toml and edit to taste.
+#
+# Secrets (API keys, bot tokens) MUST NOT live in this file — use the
+# *_env fields to reference environment variables.
+
+[runtime]
+# Optional override for the data directory. Defaults to ~/.echovessel when unset.
+# Must be an absolute path if set.
+data_dir = "~/.echovessel"
+log_level = "info"
+
+[persona]
+id = "default"
+display_name = "Your Companion"
+
+[memory]
+db_path = "memory.db"
+embedder = "all-MiniLM-L6-v2"
+retrieve_k = 10
+relational_bonus_weight = 1.0
+recent_window_size = 20
+
+[llm]
+# MVP default: OpenAI-compatible provider. Zero-config works as long as
+# $OPENAI_API_KEY is set — it hits api.openai.com with gpt-4o-mini /
+# gpt-4o.
+#
+# Swap to any OpenAI-compatible endpoint by setting base_url and either
+# `model` or `tier_models` (we don't ship tier defaults for non-official
+# endpoints).
+#
+# Examples:
+#   Ollama (local, no key):
+#     base_url = "http://localhost:11434/v1"
+#     api_key_env = ""
+#     [llm.tier_models]
+#     small  = "llama3:8b"
+#     medium = "llama3:70b"
+#     large  = "llama3:70b"
+#
+#   OpenRouter:
+#     base_url = "https://openrouter.ai/api/v1"
+#     api_key_env = "OPENROUTER_API_KEY"
+#     model = "anthropic/claude-sonnet-4"
+#
+#   Anthropic native:
+#     provider = "anthropic"
+#     api_key_env = "ANTHROPIC_API_KEY"
+#     # tier defaults: haiku / sonnet / opus
+provider = "openai_compat"
+api_key_env = "OPENAI_API_KEY"
+
+# Optional: pin a single model across every tier.
+# model = "gpt-4o"
+
+# Optional: explicit tier mapping.
+# [llm.tier_models]
+# small  = "gpt-4o-mini"
+# medium = "gpt-4o"
+# large  = "gpt-4o"
+
+max_tokens = 1024
+temperature = 0.7
+timeout_seconds = 60
+
+[consolidate]
+trivial_message_count = 3
+trivial_token_count = 200
+reflection_hard_gate_24h = 3
+worker_poll_seconds = 5
+worker_max_retries = 3
+
+[idle_scanner]
+interval_seconds = 60
+
+[proactive]
+enabled = false
+tick_interval_seconds = 60
+
+# Channels — disable everything except web for MVP.
+[channels.web]
+enabled = true
+channel_id = "web"
+host = "127.0.0.1"
+port = 7777
+static_dir = "embedded"
+
+[channels.discord]
+# Discord DM channel (optional · requires `uv sync --extra discord`).
+# Create a Discord application in the Developer Portal, enable the
+# Message Content Intent, get the bot token, and put it in the env var
+# named by `token_env` (never in this file). See docs/en/channels.md
+# "Discord DM channel setup" for the full walkthrough.
+enabled = false
+channel_id = "discord"
+token_env = "ECHOVESSEL_DISCORD_TOKEN"
+# Optional allowlist — restrict DMs to specific Discord user snowflakes.
+# If unset or empty, the bot replies to DMs from anyone who opens one.
+# allowed_user_ids = [123456789012345678]
+debounce_ms = 2000
+
+[channels.imessage]
+enabled = false
+channel_id = "imessage"
+
+[channels.wechat]
+enabled = false
+channel_id = "wechat"

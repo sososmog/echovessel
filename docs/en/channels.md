@@ -1,0 +1,469 @@
+# Channels
+
+## Overview
+
+**Channels are dumb I/O adapters.** A channel owns a single external transport — the Web UI, Discord, iMessage, WeChat — and its only job is to shuttle text between that transport and the rest of the daemon. Channels do not call the LLM, do not read memory, do not decide what the persona says, do not hold persona state. Every "thought" happens one layer up, in `runtime` + `memory` + the prompt assembler. If a channel implementation is tempted to cache a mood block or run a retrieval query, the design is wrong.
+
+**One persona, many mouths.** The architectural commitment at the root of the channel system is that a persona is a single continuous identity across every transport it speaks on. When the same user talks to the persona through the Web UI in the morning and through Discord in the evening, the persona remembers the morning conversation word-for-word — not because each channel ships its own memory, but because there is exactly one memory store and it is *never sharded by transport*. Memory retrieval takes no `channel_id` filter and will never accept one. This is the most load-bearing rule in the whole module: if you break it, the illusion of a single persona collapses, and every channel becomes a separate bot.
+
+**The debounce problem belongs here.** Real humans type in bursts: three lines in four seconds, pause, one more line. If the channel forwarded each line to the runtime as a separate turn, the persona would interrupt the user mid-thought. The fix is to group bursts into a single `IncomingTurn` *at the channel layer*, not at the runtime layer — the channel is the only component that knows the transport's native timing (Discord's typing indicator, iMessage's read-receipt cadence, the Web UI's input events) and is the only component with a stable per-user timer. Runtime stays simple: it consumes one turn at a time. All the "wait and see if the user is still talking" logic lives inside each channel, behind a small state machine documented in §Architecture.
+
+---
+
+## Core Concepts
+
+**`Channel` Protocol** — the Python `Protocol` every transport implements. Defines the small set of methods runtime calls: `start()`, `stop()`, `incoming()`, `send()`, `on_turn_done()`, plus the `channel_id` identity property. A class is a channel if and only if it satisfies this shape; there is no base class, no plugin registry, no decorator. The authoritative definition lives in `src/echovessel/channels/base.py`.
+
+**`IncomingTurn`** — a debounced burst of one or more `IncomingMessage` objects that share a single `turn_id` and represent what the user said in one breath. The channel emits `IncomingTurn`s from its `incoming()` async iterator; runtime treats each yielded turn as exactly one LLM invocation unit. Even a single-line message becomes an `IncomingTurn` of length one — there is no second code path for the degenerate case.
+
+**`IncomingMessage`** — a single raw user message inside a turn. Carries `channel_id`, `user_id`, `content`, `received_at`, an optional channel-native `external_ref`, and a back-pointer `turn_id` to the enclosing `IncomingTurn`. Memory persists these one-by-one as the leaf units of the L2 recall log.
+
+**`OutgoingMessage`** — what runtime hands to `channel.send()`. Contains only what a dumb I/O adapter needs: `content`, an optional `in_reply_to_turn_id`, a `kind` discriminating normal `"reply"` from autonomous `"proactive"` pushes, and a `delivery` field (`"text"` or `"voice_neutral"` in the current codebase) that tells the channel how to physically deliver the message. Persona state, mood, retrieval results are not in here — they have already been consumed to produce `content`.
+
+**`in_flight_turn_id`** — channel-side state. Holds the `turn_id` of the turn that runtime is currently processing, or `None` if runtime is idle. This one field is the entire coordination protocol between the channel's debounce machine and the runtime's turn loop. When it is `None`, new user input goes to the current turn and runs the debounce timer. When it is set, new user input goes to the next-turn buffer and waits. Runtime clears it by calling `on_turn_done(turn_id)` from the other end.
+
+**`current_turn` / `next_turn`** — the two buffers that make up the debounce state machine. `current_turn` is the burst the channel is still accumulating for the *next* flush; `next_turn` is the buffer for messages that arrived while runtime was still busy on the previous turn. The two-buffer scheme is what prevents user messages from being dropped during an LLM call while still keeping the "one turn at a time" guarantee that runtime relies on.
+
+**`on_turn_done(turn_id)`** — the runtime-to-channel callback fired after the LLM finishes processing a turn. Signals to the channel that its `in_flight_turn_id` is clear and it may promote the `next_turn` buffer. The single most important rule about this callback: if `next_turn` is non-empty, the channel does **not** flush it immediately — it moves it into `current_turn` and *starts a normal debounce timer*. See §Architecture for why.
+
+---
+
+## Architecture
+
+### Where channels sit in the stack
+
+EchoVessel is five layered modules with strict import direction. Channels live in the third layer, above memory/voice/core and below runtime:
+
+```
+   ┌─────────────────────────────────────────────┐
+   │                   runtime                   │   Layer 4
+   │   daemon, turn dispatch, LLM, observers     │
+   └─────────────────┬───────────────────────────┘
+                     │ imports
+          ┌──────────┴──────────┐
+          ▼                     ▼
+   ┌────────────┐        ┌──────────────┐        Layer 3
+   │  channels  │        │  proactive   │
+   │  I/O, debounce      │  policy, trigger
+   └─────┬──────┘        └──────┬───────┘
+         │ imports              │ imports
+         └──────────┬───────────┘
+                    ▼
+          ┌──────────────────┐
+          │      memory      │                   Layer 2
+          │   L1 L2 L3 L4    │
+          └────────┬─────────┘
+                   │
+          ┌────────┴─────────┐
+          │       voice      │                   Layer 2
+          │   TTS / STT      │
+          └────────┬─────────┘
+                   ▼
+          ┌──────────────────┐
+          │       core       │                   Layer 1
+          │  types, enums    │
+          └──────────────────┘
+```
+
+A channel may import from `echovessel.core` (types), `echovessel.memory` (read-only query API for history display, plus `ingest_message` via runtime), and `echovessel.voice` (to materialise voice replies). A channel may **not** import from `echovessel.runtime` — the dependency goes the other way, runtime imports channels. A channel may also not import another channel: the web channel does not import the Discord channel, every channel stands alone behind the shared Protocol. The layering is enforced in CI by `import-linter`.
+
+### Two ironrules the channel layer exists to enforce
+
+Two rules sit at the root of the whole design. Both are phrased in terms of what channels are forbidden from doing, because the channel layer is the boundary where the temptation is strongest.
+
+**Memory retrieval never accepts a channel filter.** The memory module's `retrieve()` function, its core-block loader, and its recall-message query all take persona and user, and never take a transport identifier. There is no `retrieve(..., channel_id="web")` overload and there never will be. If you are writing a channel and you find yourself wanting to "just show this channel's history to the persona", stop: the persona has one history, and the whole point of the architecture is that it does not know which transport a memory came from. The only place a `channel_id` ever reaches is the L2 recall-message row, where it lives as a `via-` tag for UI rendering — not for retrieval.
+
+**LLM prompts never contain transport-identity tokens.** The system prompt, the user turn, the retrieved context blocks — none of them contain the strings `"web"`, `"discord"`, `"imessage"`, `"wechat"`, or any other transport name. The LLM has no concept of where a message came from. The runtime's prompt assembler has a hard-coded Style section that tells the model to reference topics and feelings, never the medium, even if the user jokes about it. Channels are forbidden from stashing any "channel context" field in the envelope passed upward, because such a field would eventually leak into a prompt.
+
+Together these two rules are the reason the channel layer exists as a separate module at all. Without them, channels would just be thin wrappers that each call the LLM directly, and the persona would fragment into per-transport clones.
+
+### The debounce state machine
+
+A channel has four states, driven by three events: a new user message, a debounce timer expiring, and `on_turn_done` firing from runtime.
+
+```
+          ┌──────────────────────────────────────┐
+          │                                      │
+          │            ┌──────────┐              │
+          │            │   idle   │◀─────────────┘
+          │            └────┬─────┘   on_turn_done
+          │                 │          (next_turn empty)
+          │  new msg,       │
+          │  in_flight=None │
+          │                 ▼
+          │         ┌──────────────┐
+          │         │  collecting  │◀──┐
+          │         │ (timer ticks)│   │ new msg (reset timer)
+          │         └──────┬───────┘   │
+          │                │           │
+          │     timer      │           │
+          │     fires      │           │
+          │                ▼           │
+          │         ┌──────────────┐   │
+          │         │   in_flight  │   │
+          │         │ turn dispatched  │
+          │         └──────┬───────┘   │
+          │                │           │
+          │  new msg       │           │
+          │  (during LLM)  │           │
+          │                ▼           │
+          │         ┌──────────────┐   │
+          │         │ queued_next  │   │
+          │         │   buffered   │   │
+          │         └──────┬───────┘   │
+          │                │           │
+          │  on_turn_done  │           │
+          │  (promote and  │           │
+          │   start timer) │           │
+          │                ▼           │
+          │         ┌──────────────┐   │
+          │         │  collecting  │───┘
+          │         └──────────────┘
+          │
+          └──── stop() ─────────────────▶  stopped
+```
+
+Written out as rules:
+
+1. **On new user message.**
+   - If `in_flight_turn_id is None` — runtime is idle. Append the message to `current_turn`, cancel any running debounce timer, and start a fresh one (default 2000 ms, per channel, read from config).
+   - If `in_flight_turn_id is not None` — runtime is busy. Append the message to `next_turn`. **Do not start a timer for `next_turn`.** The timer will be started later, when `on_turn_done` fires.
+
+2. **On debounce timer expiry.** Mint a fresh `turn_id`, wrap the accumulated `current_turn` as an `IncomingTurn`, push it onto the outbound queue that `incoming()` yields from, set `in_flight_turn_id = <new turn_id>`, and clear the `current_turn` buffer. The channel does not call memory or the LLM here; runtime does that downstream when it pulls the turn from `incoming()`.
+
+3. **On `on_turn_done(turn_id)` from runtime.** Clear `in_flight_turn_id = None`. Then:
+   - If `next_turn` is empty, do nothing. The channel is now idle; the next user message re-enters rule 1.
+   - If `next_turn` is non-empty, promote it: move its contents into `current_turn`, clear `next_turn`, and **start a normal debounce timer**. The rest of rule 1 resumes: if the user keeps typing, the timer resets; if they stop, the timer fires and rule 2 runs.
+
+The single most easy-to-get-wrong detail is this: when `on_turn_done` promotes `next_turn` to `current_turn`, the channel must **not** flush immediately. It must start a normal debounce window. The reason is that a user who fired three messages in rapid succession during the previous LLM call is very likely still typing. Flushing the promoted buffer on the spot would feel like "she interrupted me again". The worst-case tail latency from running a full debounce window is one debounce interval — user-paced delay — and that is acceptable. Implementations must preserve this behaviour.
+
+Two hard caps break the debounce early: `MAX_MESSAGES_PER_TURN = 50` and `MAX_CHARS_PER_TURN = 20000`. If either is reached the channel flushes immediately, regardless of the timer. These exist to protect the LLM context window and to prevent a runaway producer from ballooning a single turn.
+
+Debounce state is mutated from exactly one coroutine (the channel's internal ingest loop). The `on_turn_done` callback coming from runtime runs in a different coroutine, so the channel implementation is responsible for marshalling it onto the ingest loop — typically by putting an event on an internal `asyncio.Queue` and letting the ingest loop consume it. The Protocol does not mandate the mechanism, only the serial-mutation invariant.
+
+### Data flow end-to-end
+
+The end-to-end flow for one turn, from a user typing in the Web UI to the persona replying:
+
+```
+1. User types in the Web UI
+        │
+        ▼
+2. channel.incoming_raw_message(...)  (channel-internal)
+        │   append to current_turn
+        │   reset debounce timer
+        ▼
+3. debounce timer expires
+        │   mint turn_id
+        │   push IncomingTurn onto internal queue
+        │   set in_flight_turn_id
+        ▼
+4. channel.incoming() yields IncomingTurn
+        │
+        ▼
+5. TurnDispatcher puts turn on its serial queue
+        │
+        ▼
+6. runtime._handle_turn(turn)
+        │   calls assemble_turn(ctx, turn, llm_provider)
+        │     - ingest_message(...) for each leaf (writes L2)
+        │     - retrieve(...)    (NO channel_id argument)
+        │     - assemble prompt  (NO transport name in text)
+        │     - llm.complete(...)  (streaming tokens)
+        │     - ingest_message(role=ASSISTANT, ...) for reply
+        ▼
+7. runtime calls channel.send(OutgoingMessage(
+        content=reply_text,
+        in_reply_to_turn_id=turn.turn_id,
+        kind="reply",
+        delivery="text" | "voice_neutral",
+     ))
+        │
+        ▼
+8. runtime calls channel.on_turn_done(turn.turn_id)
+        │   channel clears in_flight_turn_id
+        │   if next_turn is non-empty:
+        │       promote to current_turn and start debounce timer
+        ▼
+9. loop back to step 1
+```
+
+Runtime's `ChannelRegistry` owns the lifecycle (`start_all` / `stop_all`) and merges every registered channel's `incoming()` into one async stream via `registry.all_incoming()`. The `TurnDispatcher` reads from that merged stream and feeds a single serial handler — so even with four channels live, there is still only one turn being processed at a time. This is intentional: it is the guarantee that lets memory writes and LLM calls assume no concurrent mutation.
+
+### The Web channel prototype
+
+The current codebase ships a standalone React prototype for the Web channel frontend under `src/echovessel/channels/web/frontend/`. It is a Vite + TypeScript app that runs on its own (`npm install && npm run dev`) with all state mocked in `localStorage` — no backend required. It exists so that frontend layout, SSE event shapes, and interaction patterns can be iterated independently of the Python daemon.
+
+The full backend wire-up — a FastAPI `WebChannel` that exposes `POST /api/message`, streams `chat.message.*` events over SSE, implements the debounce state machine described above, and talks to runtime through the Channel Protocol — is on the roadmap and not yet in the codebase. When it lands it will live under `src/echovessel/channels/web/backend/` and implement the `Channel` Protocol from `base.py`.
+
+---
+
+## How to Extend
+
+### 1. Write a minimal channel adapter
+
+A channel is any class that satisfies the `Channel` Protocol. There is no base class to inherit and no plugin registry to call. The skeleton looks like this:
+
+```python
+# src/echovessel/channels/myxform/channel.py
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+
+from echovessel.runtime.interaction import IncomingMessage, IncomingTurn
+
+
+class MyTransformChannel:
+    # --- Identity -------------------------------------------------------
+    channel_id: str = "myxform"
+    display_name: str = "My Transform"
+
+    def __init__(self, *, config: dict) -> None:
+        self._config = config
+        self._outbox: asyncio.Queue[IncomingTurn] = asyncio.Queue()
+        self._stopped = asyncio.Event()
+        # Debounce state — see example 2.
+        self._current_turn: list[IncomingMessage] = []
+        self._next_turn: list[IncomingMessage] = []
+        self._timer: asyncio.Task | None = None
+        self._in_flight_turn_id: str | None = None
+        self._debounce_ms: int = config.get("turn_debounce_ms", 2000)
+
+    # --- Lifecycle ------------------------------------------------------
+    async def start(self) -> None:
+        # Open sockets, bind ports, connect to the external service.
+        # Idempotent: calling start() twice is a no-op.
+        pass
+
+    async def stop(self) -> None:
+        # Graceful shutdown: flush outgoing buffers, close sockets.
+        # After stop() returns, incoming() must exhaust on its next pull.
+        self._stopped.set()
+        if self._timer is not None:
+            self._timer.cancel()
+        await self._outbox.put(None)  # sentinel
+
+    # --- Inbound --------------------------------------------------------
+    async def incoming(self) -> AsyncIterator[IncomingTurn]:
+        while not self._stopped.is_set():
+            item = await self._outbox.get()
+            if item is None:
+                return
+            yield item
+
+    async def on_turn_done(self, turn_id: str) -> None:
+        # Runtime finished the turn. Idempotent; never raises.
+        self._in_flight_turn_id = None
+        if self._next_turn:
+            self._current_turn = self._next_turn
+            self._next_turn = []
+            self._start_debounce_timer()
+
+    # --- Outbound -------------------------------------------------------
+    async def send(self, message) -> None:
+        # Deliver the persona reply. message.delivery tells you whether
+        # to push text or to call VoiceService first. See example 3 for
+        # the voice path.
+        if message.delivery == "text":
+            await self._push_text(message.content)
+        elif message.delivery == "voice_neutral":
+            await self._push_voice(message.content)
+
+    # --- User id mapping -----------------------------------------------
+    def map_external_user(self, external_id: str) -> str:
+        # MVP: single-user contract. Every channel returns "self" until
+        # multi-user support is wired through runtime/config.
+        return "self"
+```
+
+For more fleshed-out examples, look at the channel stubs under `tests/` — they exercise the Protocol end-to-end with a fake transport and are the easiest thing to copy-paste from when starting a new adapter. The merge point that runtime uses is in `src/echovessel/runtime/channel_registry.py`; as long as your class exposes `channel_id`, `start`, `stop`, `incoming`, `send`, and (optionally) `on_turn_done`, the registry will accept it.
+
+### 2. Implement the debounce state machine
+
+The two buffers, the single timer, the `in_flight_turn_id` flag, and the promote-and-debounce rule on `on_turn_done`. The core lives in two methods of the channel class:
+
+```python
+import uuid
+
+
+class MyTransformChannel:
+    # ... lifecycle methods omitted ...
+
+    async def _on_raw_user_message(self, content: str, *, user_id: str) -> None:
+        """Called by the channel's transport ingest loop for every raw
+        user message the external service hands it. This is the ONLY
+        place debounce state is mutated."""
+
+        msg = IncomingMessage(
+            channel_id=self.channel_id,
+            user_id=user_id,
+            content=content,
+            received_at=datetime.now(timezone.utc),
+        )
+
+        if self._in_flight_turn_id is None:
+            # Runtime is idle: append to current_turn and (re)start timer.
+            self._current_turn.append(msg)
+            self._start_debounce_timer()
+        else:
+            # Runtime is busy: buffer in next_turn, no timer yet.
+            self._next_turn.append(msg)
+
+        # Hard caps: flush immediately if the current burst exceeds
+        # either limit. Runs only when the buffer we just grew belongs
+        # to current_turn.
+        if self._in_flight_turn_id is None:
+            if (
+                len(self._current_turn) >= 50
+                or sum(len(m.content) for m in self._current_turn) >= 20000
+            ):
+                await self._flush_current_turn()
+
+    def _start_debounce_timer(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+        self._timer = asyncio.create_task(self._debounce_and_flush())
+
+    async def _debounce_and_flush(self) -> None:
+        try:
+            await asyncio.sleep(self._debounce_ms / 1000.0)
+        except asyncio.CancelledError:
+            return
+        await self._flush_current_turn()
+
+    async def _flush_current_turn(self) -> None:
+        if not self._current_turn:
+            return
+        turn_id = str(uuid.uuid4())
+        # Back-fill turn_id on each leaf message.
+        stamped = [
+            IncomingMessage(
+                channel_id=m.channel_id,
+                user_id=m.user_id,
+                content=m.content,
+                received_at=m.received_at,
+                external_ref=m.external_ref,
+                turn_id=turn_id,
+            )
+            for m in self._current_turn
+        ]
+        turn = IncomingTurn(
+            turn_id=turn_id,
+            channel_id=self.channel_id,
+            user_id=stamped[0].user_id,
+            messages=stamped,
+            received_at=datetime.now(timezone.utc),
+        )
+        self._current_turn = []
+        self._in_flight_turn_id = turn_id
+        await self._outbox.put(turn)
+```
+
+Two things to watch for when porting this to a real transport:
+
+- **`on_turn_done` promotes through the normal debounce window, never an instant flush.** The promote path in the lifecycle section above must call `_start_debounce_timer()`. Skipping the timer because "the next buffer is already full" re-introduces the interruption bug that this whole module exists to fix.
+- **Serial mutation.** Only one coroutine should touch `_current_turn`, `_next_turn`, `_timer`, and `_in_flight_turn_id`. If your transport callback runs on a different loop or thread, marshal it onto the ingest loop via an `asyncio.Queue` or `loop.call_soon_threadsafe`, and do the actual state update inside the ingest loop.
+
+### 3. Expose a `push_sse` capability
+
+Some transports — the Web channel is the obvious example — naturally speak server-sent events. Runtime's observer layer wants to push lifecycle events (memory writes, consolidation ticks, voice-generation progress) to any channel that can forward them to a live UI, but it does not want to require this capability of every channel. Discord has no SSE; iMessage has no SSE.
+
+The pattern is an optional method, detected by `getattr`:
+
+```python
+from typing import Any
+
+
+class MyTransformChannel:
+    # ... Protocol methods omitted ...
+
+    async def push_sse(self, event: str, payload: dict[str, Any]) -> None:
+        """Optional capability. Channels that can stream events to a
+        live UI implement this; channels that can't simply don't define
+        it. Runtime's observer code detects support with:
+
+            push = getattr(channel, "push_sse", None)
+            if push is not None:
+                await push(event_name, payload)
+        """
+        # Fan out to every connected SSE subscriber.
+        for subscriber in list(self._sse_subscribers):
+            try:
+                await subscriber.send(event, payload)
+            except Exception:
+                self._sse_subscribers.discard(subscriber)
+```
+
+Runtime's observer wiring (in `src/echovessel/runtime/`) checks for `push_sse` with `getattr` and silently skips channels that don't define it. This keeps the Channel Protocol minimal while still letting a Web channel light up a rich real-time UI. Do not add `push_sse` to the core Protocol — its optionality is the whole point.
+
+---
+
+For the authoritative source of the Channel Protocol, see `src/echovessel/channels/base.py`. For the registry and dispatch plumbing, see `src/echovessel/runtime/channel_registry.py` and `src/echovessel/runtime/turn_dispatcher.py`. The turn pipeline itself — where memory retrieval and LLM assembly enforce the no-transport-leak rules — lives in `src/echovessel/runtime/interaction.py`.
+
+---
+
+## Discord DM channel setup
+
+EchoVessel ships an optional Discord channel so a persona can receive direct messages from allow-listed Discord users. Same persona, same memory, same mood — the only difference from Web is the transport. A persona DMed on Discord still remembers conversations that started on the Web UI, and vice versa, because memory retrieval never filters by channel.
+
+Current scope is **DM only**. Guild channels, slash commands, and voice message attachments are not in v1.
+
+### 1. Create a Discord bot application
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**. Give it whatever name you like — the display name is what users see on DMs.
+2. In the sidebar open **Bot**, click **Add Bot**, and accept the warning.
+3. Scroll to **Privileged Gateway Intents** and enable **Message Content Intent**. Without this, your bot receives empty DM bodies.
+4. Still on the Bot page, click **Reset Token** (or **Copy** if a token is already issued) and save the string — Discord only shows it once.
+
+### 2. Install the optional dependency
+
+The Discord channel is an optional extra so users who only want the Web UI do not need to install `discord.py`:
+
+```bash
+uv sync --extra discord
+```
+
+### 3. Expose the token via environment variable
+
+EchoVessel never stores the token inside `config.toml`. Set it as an environment variable and reference the variable name from config:
+
+```bash
+export ECHOVESSEL_DISCORD_TOKEN='your-bot-token-here'
+```
+
+Add the same line to your shell profile (`~/.zshrc`, `~/.bashrc`, or equivalent) so it survives reboots.
+
+### 4. Enable the channel in `config.toml`
+
+Open your `config.toml` (typically at `~/.echovessel/config.toml`) and add:
+
+```toml
+[channels.discord]
+enabled = true
+channel_id = "discord"
+token_env = "ECHOVESSEL_DISCORD_TOKEN"
+# Optional but recommended: only let specific Discord user IDs DM the bot.
+# Leave this out to accept DMs from anyone the bot can reach.
+allowed_user_ids = [123456789012345678]
+# Debounce window in milliseconds. Matches the Web channel default.
+debounce_ms = 2000
+```
+
+`allowed_user_ids` takes Discord **user snowflakes** — the 17–19 digit numeric IDs visible when you right-click a user with Developer Mode enabled. Without this allowlist, any Discord user who happens to find your bot can DM it.
+
+### 5. Invite the bot to a shared location
+
+Discord only lets a user DM a bot if they share at least one server with it. Create an OAuth2 invite link in the Developer Portal (Scopes: `bot`, Permissions: just **Read Messages / Send Messages** is enough) and open it to add the bot to a server you already belong to. No channel permissions inside the server are needed — the bot just needs to "be there" so Discord allows the DM.
+
+### 6. Start EchoVessel and send a DM
+
+Run the daemon as usual. On a successful startup you should see a log line like `Discord bot connected as YourBot#1234`. Click the bot in your server's member list and send it a direct message — the persona replies on the same DM thread with the same memory and mood it has on the Web UI.
+
+### Troubleshooting
+
+- **"Discord bot rejected DM from non-allowlisted user"** — your user ID is not in `allowed_user_ids`. Copy your Discord user ID (right-click yourself with Developer Mode on → Copy User ID) and add it.
+- **DM body arrives empty** — Message Content Intent is off on the Bot page. Re-enable it and restart the daemon.
+- **Bot comes online but never responds** — make sure you and the bot share a server. A bot you never invited anywhere cannot receive DMs.
+- **"Improper token" at startup** — `ECHOVESSEL_DISCORD_TOKEN` is unset or copied with surrounding whitespace. A healthy token is roughly 70 characters.
