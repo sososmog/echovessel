@@ -115,6 +115,43 @@ def build_control_app(runtime: Runtime) -> FastAPI:
             ),
         }
 
+    @app.post("/shutdown")
+    async def shutdown() -> dict[str, Any]:
+        """Schedule a graceful shutdown, then return immediately.
+
+        We delay the actual ``shutdown_event.set()`` by 100 ms via
+        ``loop.call_later`` so the HTTP response flushes before the
+        event loop starts unwinding. The CLI reads this response and
+        prints "stopped (via control plane)" — if we set the event
+        synchronously the client would see a broken connection
+        instead.
+        """
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.1, runtime.ctx.shutdown_event.set)
+        return {"ok": True}
+
+    @app.post("/reload")
+    async def reload() -> JSONResponse:
+        """Re-read config.toml and hot-swap any changed components.
+
+        Delegates to :meth:`Runtime.reload`, which returns a list of
+        reloaded component names (e.g. ``["llm"]`` when the LLM
+        provider was rebuilt). An empty list means "call succeeded
+        but nothing actually changed" — still 200.
+
+        Internal exceptions are caught by Runtime.reload and logged;
+        this endpoint only catches the truly unexpected and renders
+        them as 500 so the daemon stays alive.
+        """
+        try:
+            reloaded = await runtime.reload()
+        except Exception as e:  # noqa: BLE001
+            log.exception("reload endpoint: unexpected error")
+            return JSONResponse(
+                {"ok": False, "error": str(e)}, status_code=500
+            )
+        return JSONResponse({"ok": True, "reloaded": list(reloaded)})
+
     return app
 
 

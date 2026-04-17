@@ -276,6 +276,10 @@ class Runtime:
         # port). Initialised in :meth:`start`, torn down in :meth:`stop`.
         self._control_server: Any = None
         self._control_task: asyncio.Task | None = None
+        # 2026-04-daemon-control · Serialize reload across HTTP and
+        # SIGHUP entry points so two overlapping reload requests
+        # can't corrupt `ctx.config` / `ctx.llm` mid-swap.
+        self._reload_lock: asyncio.Lock | None = None
         # Worker X · Cross-channel SSE. The single SSEBroadcaster instance
         # the Web SSE route subscribes to. Shared with WebChannel so
         # Web-sourced events (user_appended / token / done) still fan
@@ -1450,21 +1454,42 @@ class Runtime:
 
     # ---- SIGHUP reload -----------------------------------------------------
 
-    async def reload(self) -> None:
+    async def reload(self) -> list[str]:
         """Reload config and swap LLM provider. See spec §6.5.
 
         Only changes to [llm] / [consolidate] / [idle_scanner] / [proactive]
         are honoured; structural sections (memory / channels / persona /
         runtime) require a full restart.
+
+        Returns a list of component names that were actually reloaded
+        (e.g. ``["llm"]``). Empty list means the call was a no-op (no
+        config path, invalid new config, or nothing changed). The
+        caller can surface this to the operator — for example the
+        HTTP ``POST /reload`` endpoint renders it in its JSON body.
+
+        Serialized via ``_reload_lock`` so two overlapping reload
+        requests (HTTP + SIGHUP, or two HTTP clients) can't race on
+        ``ctx.config`` / ``ctx.llm`` mid-swap.
         """
+        # Lazy-init because the lock must be bound to the running loop
+        # and we can't guarantee one exists at __init__ time.
+        if self._reload_lock is None:
+            self._reload_lock = asyncio.Lock()
+
+        async with self._reload_lock:
+            return await self._reload_unlocked()
+
+    async def _reload_unlocked(self) -> list[str]:
+        reloaded: list[str] = []
+
         if self.ctx.config_path is None:
             log.warning("reload: no config path; cannot reload from disk")
-            return
+            return reloaded
         try:
             new_config = load_config(self.ctx.config_path)
         except Exception as e:  # noqa: BLE001
             log.warning("reload: new config invalid, keeping old: %s", e)
-            return
+            return reloaded
 
         old_llm = self.ctx.llm
         if new_config.llm != self.ctx.config.llm:
@@ -1474,7 +1499,7 @@ class Runtime:
                 log.warning(
                     "reload: failed to build new LLM provider, keeping old: %s", e
                 )
-                return
+                return reloaded
             # Re-wrap the freshly-built provider so SIGHUP reload doesn't
             # silently drop cost tracking for subsequent calls.
             from echovessel.runtime.cost_logger import (
@@ -1498,9 +1523,11 @@ class Runtime:
                 new_llm.provider_name,
                 new_llm.model_for(LLMTier.LARGE),
             )
+            reloaded.append("llm")
 
         self.ctx.config = new_config
         log.info("config reloaded from %s", self.ctx.config_path)
+        return reloaded
 
     # ---- Worker ζ · cost ledger accessors (channels.web cannot import) -----
     #
