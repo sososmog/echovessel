@@ -205,6 +205,12 @@ class RuntimeContext:
     )
     voice_service: VoiceService | None = None
     loop: asyncio.AbstractEventLoop | None = None
+    #: Control-plane listener port (kernel-assigned at start). None until
+    #: :meth:`Runtime.start` has brought the control-plane server up.
+    #: The pidfile writer reads this so the CLI can hit
+    #: ``POST http://127.0.0.1:<control_port>/shutdown`` via HTTP instead
+    #: of SIGTERM. See :mod:`echovessel.runtime.control`.
+    control_port: int | None = None
 
 
 class RuntimeContextPersonaView:
@@ -264,6 +270,12 @@ class Runtime:
         self._web_channel: Any = None
         self._web_uvicorn_server: Any = None
         self._web_uvicorn_task: asyncio.Task | None = None
+        # 2026-04-daemon-control · Control plane uvicorn server
+        # (always on — orthogonal to the Web channel, serves
+        # /health, /shutdown, /reload over an independent loopback
+        # port). Initialised in :meth:`start`, torn down in :meth:`stop`.
+        self._control_server: Any = None
+        self._control_task: asyncio.Task | None = None
         # Worker X · Cross-channel SSE. The single SSEBroadcaster instance
         # the Web SSE route subscribes to. Shared with WebChannel so
         # Web-sourced events (user_appended / token / done) still fan
@@ -706,6 +718,24 @@ class Runtime:
         if register_signals:
             self._register_signal_handlers()
 
+        # 2026-04-daemon-control · Bring up the control plane AFTER
+        # everything else has started. This way `/health` starts
+        # answering only when the daemon is actually ready to serve
+        # turns, not during the middle of boot. Failure is non-fatal:
+        # the daemon still functions, only remote lifecycle control
+        # (HTTP stop/reload) degrades to signal-only.
+        try:
+            await self._start_control_plane()
+        except Exception as e:  # noqa: BLE001
+            log.error(
+                "control plane failed to start; CLI will fall back to "
+                "signal-based stop/reload: %s",
+                e,
+            )
+            self._control_server = None
+            self._control_task = None
+            self.ctx.control_port = None
+
         self._print_local_first_disclosure()
 
     async def wait_until_shutdown(self) -> None:
@@ -714,6 +744,13 @@ class Runtime:
     async def stop(self, *, timeout: float = 15.0) -> None:
         log.info("runtime stopping")
         self.ctx.shutdown_event.set()
+
+        # 2026-04-daemon-control · Stop the control plane first so
+        # operator requests cannot arrive during teardown (they would
+        # get a stale runtime view). The Web channel + other channels
+        # stop later in this method.
+        if self._control_server is not None or self._control_task is not None:
+            await self._stop_control_plane(timeout=min(timeout, 5.0))
 
         # Unregister memory observer early so in-flight session-closed
         # events from consolidate/idle shutdown don't try to broadcast
@@ -826,6 +863,37 @@ class Runtime:
                 exc_info=True,
             )
             return None
+
+    # ---- 2026-04-daemon-control · Control plane lifecycle ------------------
+
+    async def _start_control_plane(self) -> None:
+        """Bring up the daemon control plane on its own loopback port.
+
+        The control plane is orthogonal to the Web channel: it lives on
+        a kernel-assigned port (127.0.0.1:0) and serves /health,
+        /shutdown, /reload for CLI consumption. See
+        :mod:`echovessel.runtime.control` for the trust model and
+        endpoint list.
+        """
+
+        from echovessel.runtime.control import start_control_server
+
+        task, server, port = await start_control_server(self)
+        self._control_task = task
+        self._control_server = server
+        self.ctx.control_port = port
+
+    async def _stop_control_plane(self, *, timeout: float = 5.0) -> None:
+        """Teardown counterpart to :meth:`_start_control_plane`."""
+
+        from echovessel.runtime.control import stop_control_server
+
+        await stop_control_server(
+            self._control_task, self._control_server, timeout=timeout
+        )
+        self._control_task = None
+        self._control_server = None
+        self.ctx.control_port = None
 
     # ---- Stage 2 · Web channel lifecycle -----------------------------------
 
