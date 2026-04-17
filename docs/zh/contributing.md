@@ -114,6 +114,46 @@ Guard test 在 `tests/runtime/test_f10_no_channel_in_prompt.py`。它从 fixture
 
 每个 PR 必须保持 `pytest tests/` 全绿、`ruff check` 干净、两条 `import-linter` 契约满足。
 
+## Commit message
+
+仓库强制一小组规则,其他是推荐。
+
+**每个 commit 必须:**
+
+- **标题说 what,正文说 why。** diff 本身已经说 how。标题自洽时正文可省;读者会问"为什么?"时就写一段。
+- **Imperative 语气。** `add X` / `fix Y`,不是 `added X` / `fixes Y`。
+- **一次只做一件事。** 不要"修 bug + 顺手重构 + 动了无关文档"混成一个 commit,拆开写。
+- **三绿才提交。** `uv run pytest`、`uv run ruff check src/ tests/`、`uv run lint-imports` 本地全过。
+- **标题 ≤ 72 字符,** 让 `git log --oneline` 读着清爽。
+
+**推荐(软约束):**
+
+单一范畴的改动优先用 Conventional Commits 前缀:
+
+| 前缀 | 用于 |
+| --- | --- |
+| `feat:` | 用户可见的新能力 |
+| `fix:` | bug 修复 |
+| `docs:` | 只动文档 |
+| `refactor:` | 内部重构,不改行为 |
+| `test:` | 只动测试 |
+| `chore:` | 构建 / 依赖 / 工具链 |
+| `perf:` | 性能优化 |
+
+加 scope 更清楚(模块名或文件):`fix(memory): ...`、`docs(README): ...`、`refactor(runtime): ...`。
+
+跨模块 / 里程碑类型的大改不强求前缀,用 `·` 分段的自由格式即可——例如 `Wave A · admin UI truth-layer landing`。
+
+**反模式:**
+
+- 含糊标题:`updates`、`misc fixes`、`WIP` 留在 `main`。
+- `fix X and refactor Y`——两件事,两个 commit。
+- 只说 what 不说 why(当读者半年后会疑惑时)。
+
+**刻意不引入:**
+
+不装 commit-msg hook、不做 CI 强制、不要 DCO sign-off、不要 issue trailer。审核者是 reviewer(和未来的你)。
+
 ## 提交 PR
 
 好 PR 的样子:

@@ -114,6 +114,46 @@ When you add a feature:
 
 Every PR must keep `pytest tests/` green, `ruff check` clean, and both `import-linter` contracts satisfied.
 
+## Commit messages
+
+The repo enforces a small set of rules and recommends the rest.
+
+**Required of every commit:**
+
+- **Subject = what. Body = why.** The diff already says how. Skip the body when the subject is self-explanatory; write one whenever a reasonable reader would ask "why?".
+- **Imperative mood.** `add X`, `fix Y` — not `added X` / `fixes Y`.
+- **One logical change per commit.** No "fix bug + refactor helper + touch unrelated docs" mega-commits. Split them.
+- **Three green before committing.** `uv run pytest`, `uv run ruff check src/ tests/`, and `uv run lint-imports` must all pass locally.
+- **Subject ≤ 72 characters** so `git log --oneline` stays readable.
+
+**Recommended (soft):**
+
+Use a Conventional Commits prefix for single-area changes:
+
+| Prefix | Use for |
+| --- | --- |
+| `feat:` | user-visible new capability |
+| `fix:` | bug fix |
+| `docs:` | documentation only |
+| `refactor:` | internal change, no behavior change |
+| `test:` | test-only change |
+| `chore:` | build / deps / tooling |
+| `perf:` | performance improvement |
+
+Add a scope when it clarifies (module name or file): `fix(memory): ...`, `docs(README): ...`, `refactor(runtime): ...`.
+
+For milestones or cross-module pushes that don't fit a single prefix, a free-form subject with `·` as a separator is fine — for example `Wave A · admin UI truth-layer landing`.
+
+**Anti-patterns:**
+
+- Vague subjects: `updates`, `misc fixes`, `WIP` left on `main`.
+- `fix X and refactor Y` — two topics, two commits.
+- Stating only *what* when *why* would not be obvious to a reader six months from now.
+
+**What the repo deliberately does not require:**
+
+No commit-msg hook, no CI enforcement, no DCO sign-off, no issue-number trailer. The reviewer (and future you) is the checker.
+
 ## Submitting a pull request
 
 A good PR:
