@@ -1,0 +1,17 @@
+name: Notify blog to rebuild
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**/*.html'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel deploy hook
+        run: |
+          curl -fsSL -X POST "${{ secrets.BLOG_DEPLOY_HOOK }}" -o /dev/null
+          echo "Triggered blog rebuild."
