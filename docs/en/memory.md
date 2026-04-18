@@ -186,6 +186,128 @@ Two things worth calling out because they trip new readers:
 - **The `emotional_impact` that drives SHOCK is produced by the extraction LLM itself**, not by a separate classifier. Each event it emits must carry a signed integer in `[-10, +10]`; consolidate just checks `max(|impact|) >= 8` over the events that were just written. The extraction prompt (`prompts/extraction.py`) tells the model how to use the scale, with `-7 = serious loss / grief` and `+7 = major positive milestone` as anchor points.
 - **SHOCK and TIMER are OR'd; the hard gate is AND'd on top.** The rule is "run reflection if (shock OR timer_due), UNLESS three thoughts already landed in the last 24 h". The gate protects against a single emotionally dense day racking up an unbounded reflection bill.
 
+### End-to-end walkthrough · life of one message
+
+Concrete timeline, one message's worth. Times are illustrative; exact values come from the constants in the table above.
+
+```
+t = 0s             User types "hi" in the Web channel
+                   ↓
+  WebChannel debounces (~2s), emits IncomingTurn to runtime
+                   ↓
+  runtime.handle_turn() begins
+                   ↓
+┌─ memory.ingest_message(persona, user, channel, USER, "hi")
+│    get_or_create_open_session(persona, user, channel)
+│      · SELECT OPEN sessions WHERE (persona, user, channel, deleted_at IS NULL)
+│      · any row with last_message_at > now - 30min?      → return it
+│      · stale row (idle > 30min)?                         → mark_closing('idle'), make new
+│      · no row at all?                                    → INSERT new OPEN session
+│    INSERT recall_messages (role=USER, content, turn_id, channel_id, day)
+│    UPDATE session: message_count++, total_tokens+=N, last_message_at=now
+│    check_length_trigger
+│      · message_count ≥ 200 OR total_tokens ≥ 20_000?    → mark_closing('max_length')
+│    db.commit()
+│    fire on_message_ingested(msg) · drain pending lifecycle queue
+└─
+
+t ≈ 0.1s           runtime prepares the reply
+                   ↓
+┌─ memory.load_core_blocks(persona, user)
+│    → 5 rows (persona / self / mood [shared] + user / relationship [per-user])
+│
+├─ memory.retrieve(persona, user, query=last_user_msg, embed_fn, top_k=10)
+│    query_vec = embed_fn(query)
+│    backend.vector_search(query_vec, types=('event','thought'), top_k=40)
+│    load ConceptNode rows where deleted_at IS NULL
+│    rerank each: 0.5·recency + 3·relevance + 2·impact + relational_bonus
+│    drop where relevance < min_relevance (default 0.4)       ← over-recall floor
+│    keep top_k, UPDATE access_count++, last_accessed_at
+│    optional: pull ±N L2 neighbours per event hit
+│    FTS fallback on L2 if raw vector hits < fallback_threshold
+│
+├─ assemble_turn → LLM.stream(system_prompt, user_prompt)
+│    system_prompt = persona_display_name
+│                    + "# Who you are" (5 facts)
+│                    + 5 core blocks
+│                    + STYLE_INSTRUCTIONS
+│    user_prompt   = retrieved thoughts + events
+│                    + recent L2 window (last ~20 messages)
+│                    + current user message
+│
+└─ stream tokens → channel → write accumulated reply back via ingest_message(PERSONA)
+
+t = a few seconds  persona reply is persisted. session is still OPEN.
+
+                   (user walks away · no further messages)
+
+t ≈ 30-60min       idle_scanner wakes (every 60s by default)
+                   ↓
+                   catch_up_stale_sessions(db, now)
+                     · SELECT status=OPEN AND last_message_at < now - 30min
+                     · mark_closing('catchup') each
+                     · commit
+
+t ≈ 30-60min + 5s  consolidate_worker polls (every 5s by default)
+                   ↓
+                   SELECT status=CLOSING AND extracted=False
+                   enqueue each session_id, then for each:
+                   ↓
+┌─ consolidate_session(session)
+│
+│  [A] is_trivial(session)?                                ← short + no emotion
+│        msgs < 3 AND tokens < 200 AND no peak signal
+│        yes → status=CLOSED, trivial=True, fire hook, DONE
+│        no  → continue
+│
+│  [B] if session.extracted_events is False (first pass):
+│        events = await extract_fn(messages)               ← LLM call (SMALL tier)
+│        for e in events:
+│          INSERT concept_nodes(type='event', ...)
+│          backend.insert_vector(id, embed_fn(e.description))
+│        session.extracted_events = True
+│        session.extracted_events_at = now
+│        db.commit()                                       ← RESUME POINT
+│      else (retry after a prior crash):
+│        events = SELECT concept_nodes WHERE source_session_id=session.id
+│
+│  [C] shock_event = first e where |e.emotional_impact| ≥ 8     ← extractor's score
+│
+│  [D] timer_due = no thought exists younger than 24h
+│
+│  [E] should_reflect = (shock_event OR timer_due)
+│      AND reflections_last_24h < 3                        ← hard gate
+│      if should_reflect:
+│        inputs = recent events in last 24h (+ shock_event if not already in)
+│        thoughts = await reflect_fn(inputs, reason)       ← LLM call (SMALL tier)
+│        for t in thoughts:
+│          INSERT concept_nodes(type='thought', ...)
+│          backend.insert_vector(id, embed_fn(t.description))
+│          for src_id in t.filling:
+│            INSERT concept_node_filling(parent=t.id, child=src_id)
+│        db.commit()
+│
+│  [F] session.status = 'closed'
+│      session.extracted = True
+│      session.extracted_at = now
+│      db.commit()
+│      fire on_session_closed(session)                     ← lifecycle queue drain
+└─
+
+(mood observer, if registered, reads the new events and may UPDATE core_blocks.mood)
+
+Next turn, retrieve sees the newly-written L3 events + L4 thoughts and the
+mood block reflects the closed session.
+```
+
+Three states the session can land in after all of this:
+
+| Status | Meaning | Is it retryable? |
+| --- | --- | --- |
+| `CLOSED` | happy path — `extracted=True`, session is done | no |
+| `FAILED` | `consolidate_worker` exhausted `worker_max_retries` attempts — terminal | not automatically; operator resets `status=CLOSING` + `extracted=False` to retry |
+| `CLOSING` (stuck) | daemon crashed mid-consolidate — the next startup's catchup picks it up | automatic on next boot |
+
 ### Retry safety
 
 Stage B commits the extracted L3 events **in the same transaction** as a new `extracted_events=True` flag on the session. If stage E (reflection) then raises — a transient LLM error, a timeout, even `SIGTERM` — the worker retries `consolidate_session` from the top. The top-of-function guard reads `extracted_events` and skips B entirely: already-persisted events are loaded from the database, fed into SHOCK/TIMER detection, and reflection runs against them. Extraction LLM calls are therefore run at most once per session, regardless of how many times reflection fails.

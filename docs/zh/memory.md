@@ -186,6 +186,128 @@ on_session_closed 通过生命周期队列触发
 - **驱动 SHOCK 的 `emotional_impact` 是抽取 LLM 自己给的**,不是另一个分类器。extraction prompt 要求模型对每条 event 输出 `[-10, +10]` 的带符号整数,consolidate 只是对本次新写的 events 算一个 `max(|impact|) >= 8`。prompt 里 `-7 = 严重失去 / 悲伤`、`+7 = 重大正面里程碑`是锚点(见 `prompts/extraction.py`)。
 - **SHOCK 和 TIMER 是 OR · hard gate 叠在外层 AND。** 规则是:"如果 (shock OR timer_due) 成立 · 除非过去 24h 已经 3 条 thought · 那就 reflect"。gate 是防止一整天情绪密集的对话把 reflection 账单推到无底洞。
 
+### 全流程推演 · 一条消息的一生
+
+具体时间线,一条消息走完整条路径。时间是演示,实际数值见上面那张阈值表。
+
+```
+t = 0s             用户在 Web 频道打 "hi"
+                   ↓
+  WebChannel debounce(~2s) · 发 IncomingTurn 给 runtime
+                   ↓
+  runtime.handle_turn() 启动
+                   ↓
+┌─ memory.ingest_message(persona, user, channel, USER, "hi")
+│    get_or_create_open_session(persona, user, channel)
+│      · SELECT OPEN sessions WHERE (persona, user, channel, 未删除)
+│      · 有 last_message_at > now - 30min 的?        → 直接返回
+│      · 有 stale(idle > 30min)?                      → mark_closing('idle') · 建新
+│      · 完全没行?                                    → INSERT 新 OPEN session
+│    INSERT recall_messages(role=USER, content, turn_id, channel_id, day)
+│    UPDATE session · message_count++ · total_tokens+=N · last_message_at=now
+│    check_length_trigger
+│      · message_count ≥ 200 OR total_tokens ≥ 20_000? → mark_closing('max_length')
+│    db.commit()
+│    触发 on_message_ingested(msg) · drain 生命周期队列
+└─
+
+t ≈ 0.1s           runtime 准备回复
+                   ↓
+┌─ memory.load_core_blocks(persona, user)
+│    → 5 行(persona / self / mood [共享] + user / relationship [per-user])
+│
+├─ memory.retrieve(persona, user, query=上一条用户消息, embed_fn, top_k=10)
+│    query_vec = embed_fn(query)
+│    backend.vector_search(query_vec, types=('event','thought'), top_k=40)
+│    读出 ConceptNode 行(未删除的)
+│    rerank: 0.5·recency + 3·relevance + 2·impact + relational_bonus
+│    砍掉 relevance < min_relevance(默认 0.4)            ← over-recall 地板
+│    保留 top_k · UPDATE access_count++ · last_accessed_at
+│    可选:每条 event 命中 ±N 条 L2 邻居扩展
+│    向量原始命中 < fallback_threshold 时 · 启用 L2 FTS 回退
+│
+├─ assemble_turn → LLM.stream(system_prompt, user_prompt)
+│    system_prompt = persona_display_name
+│                    + "# Who you are"(5 facts)
+│                    + 5 core blocks
+│                    + STYLE_INSTRUCTIONS
+│    user_prompt   = 检索出的 thoughts + events
+│                    + 最近 L2 窗口(最后 ~20 条消息)
+│                    + 当前用户消息
+│
+└─ 流式 token → channel · 累积的 reply 再通过 ingest_message(PERSONA) 回写
+
+t = 几秒           persona 回复落库。session 仍 OPEN。
+
+                   (用户走开 · 没有新消息)
+
+t ≈ 30-60min       idle_scanner 醒来(默认每 60s)
+                   ↓
+                   catch_up_stale_sessions(db, now)
+                     · SELECT status=OPEN AND last_message_at < now - 30min
+                     · 每行 mark_closing('catchup')
+                     · commit
+
+t ≈ 30-60min + 5s  consolidate_worker 轮询(默认每 5s)
+                   ↓
+                   SELECT status=CLOSING AND extracted=False
+                   入队每个 session_id · 逐个:
+                   ↓
+┌─ consolidate_session(session)
+│
+│  [A] is_trivial(session)?                                ← 太短 + 无情绪
+│        msgs < 3 AND tokens < 200 AND 无 peak 信号
+│        是 → status=CLOSED, trivial=True, 触发 hook, 结束
+│        否 → 继续
+│
+│  [B] 如果 session.extracted_events 是 False(首次):
+│        events = await extract_fn(messages)               ← LLM 调用(SMALL tier)
+│        for e in events:
+│          INSERT concept_nodes(type='event', ...)
+│          backend.insert_vector(id, embed_fn(e.description))
+│        session.extracted_events = True
+│        session.extracted_events_at = now
+│        db.commit()                                       ← RESUME POINT
+│      否则(上次崩了在重试):
+│        events = SELECT concept_nodes WHERE source_session_id=session.id
+│
+│  [C] shock_event = 第一个满足 |e.emotional_impact| ≥ 8 的 event   ← 抽取器给的分
+│
+│  [D] timer_due = 过去 24h 没有 thought
+│
+│  [E] should_reflect = (shock_event OR timer_due)
+│      AND 过去 24h 已有 thought 数 < 3                    ← 硬闸门
+│      if should_reflect:
+│        inputs = 过去 24h 内的 events(+ shock_event 如果不在里面)
+│        thoughts = await reflect_fn(inputs, reason)       ← LLM 调用(SMALL tier)
+│        for t in thoughts:
+│          INSERT concept_nodes(type='thought', ...)
+│          backend.insert_vector(id, embed_fn(t.description))
+│          for src_id in t.filling:
+│            INSERT concept_node_filling(parent=t.id, child=src_id)
+│        db.commit()
+│
+│  [F] session.status = 'closed'
+│      session.extracted = True
+│      session.extracted_at = now
+│      db.commit()
+│      触发 on_session_closed(session)                     ← 生命周期队列 drain
+└─
+
+(mood observer 如果注册了 · 读新 events 并可能 UPDATE core_blocks.mood)
+
+下一 turn · retrieve 能看到新写的 L3 events + L4 thoughts · mood block 也会
+反映这次 session 的情绪走向。
+```
+
+最后 session 可能停留的三种状态:
+
+| 状态 | 含义 | 能重试吗 |
+| --- | --- | --- |
+| `CLOSED` | happy path — `extracted=True` · session 走完了 | 不 |
+| `FAILED` | `consolidate_worker` 用完了 `worker_max_retries` · 终态 | 不会自动;operator 把 `status=CLOSING`、`extracted=False` 翻回来才能重试 |
+| `CLOSING`(卡住) | daemon 在 consolidate 中途挂了 · 下次启动的 catchup pass 会捡起来 | 下次 boot 自动 |
+
 ### 重试安全
 
 B 阶段把抽取出来的 L3 events **与新的 `extracted_events=True` 标志位放在同一个事务里 commit**。如果 E 阶段（reflection）随后抛异常——瞬时 LLM 错误、超时、甚至 `SIGTERM`——worker 会从头重试 `consolidate_session`。函数顶端的 guard 读取 `extracted_events`，**直接跳过 B 阶段**：已持久化的 events 从数据库加载出来，喂给 SHOCK/TIMER 判断，reflection 对着它们跑。每个 session 最多调用一次抽取 LLM，无论反思失败多少次。
