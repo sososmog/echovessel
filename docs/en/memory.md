@@ -154,7 +154,7 @@ idle > 30min OR length trigger OR lifecycle signal
 consolidate_session()             -- CLOSED after extract + reflect
        |
        +-- A. trivial? skip extraction
-       +-- B. extract_fn(messages) -> L3 events
+       +-- B. extract_fn(messages) -> L3 events    [sets extracted_events=True]
        +-- C. any event with |impact| >= 8 -> SHOCK reflection
        +-- D. > 24h since last reflection -> TIMER reflection
        +-- E. reflect_fn(recent events) -> L4 thoughts (hard gate: max 3 per 24h)
@@ -165,6 +165,17 @@ on_session_closed fires via the lifecycle queue
 ```
 
 Every step commits before the next one begins, and the observer dispatch sits strictly after the commit that transitioned `session.status`. A consolidation that crashes midway leaves the database in a recoverable state: the session stays in `CLOSING`, the next startup's catch-up pass picks it up, and no lifecycle hook fires for a session that was never really closed.
+
+### Retry safety
+
+Stage B commits the extracted L3 events **in the same transaction** as a new `extracted_events=True` flag on the session. If stage E (reflection) then raises — a transient LLM error, a timeout, even `SIGTERM` — the worker retries `consolidate_session` from the top. The top-of-function guard reads `extracted_events` and skips B entirely: already-persisted events are loaded from the database, fed into SHOCK/TIMER detection, and reflection runs against them. Extraction LLM calls are therefore run at most once per session, regardless of how many times reflection fails.
+
+This invariant matters in both directions:
+
+- `extracted=True` implies `extracted_events=True` (F only runs after B committed its flag).
+- `extracted_events=True` does NOT imply `extracted=True` — that's the whole point of the resume state.
+
+Sessions that die in state `extracted_events=True, status=CLOSING` are retried safely by the worker. Sessions that transition to `FAILED` (catch-all in `consolidate_worker._mark_failed`) are terminal and never retried automatically; admin intervention is required to reset them.
 
 ### Schema migration
 

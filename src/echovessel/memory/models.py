@@ -185,6 +185,12 @@ class Session(SQLModel, table=True):
 
     extracted: bool = False
     extracted_at: datetime | None = None
+    # Resume point for partial consolidation: set True after the extraction
+    # phase commits so a transient reflection failure can be retried without
+    # re-running extraction (which would duplicate events). Invariant:
+    # extracted=True implies extracted_events=True; never the reverse.
+    extracted_events: bool = False
+    extracted_events_at: datetime | None = None
     trivial: bool = False
 
     message_count: int = 0

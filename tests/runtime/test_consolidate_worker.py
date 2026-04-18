@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import date
 
 from sqlmodel import Session as DbSession
+from sqlmodel import select
 
-from echovessel.core.types import MessageRole, SessionStatus
+from echovessel.core.types import MessageRole, NodeType, SessionStatus
 from echovessel.memory import (
     Persona,
     RecallMessage,
@@ -17,6 +18,7 @@ from echovessel.memory import (
 )
 from echovessel.memory.backends.sqlite import SQLiteBackend
 from echovessel.memory.consolidate import ExtractedEvent
+from echovessel.memory.models import ConceptNode
 from echovessel.runtime.consolidate_worker import ConsolidateWorker
 from echovessel.runtime.llm.errors import LLMPermanentError, LLMTransientError
 
@@ -229,6 +231,104 @@ async def test_worker_marks_failed_on_permanent_error():
         sess = db.get(Session, "s_perm")
         assert sess is not None
         assert sess.status == SessionStatus.FAILED
+
+
+async def test_worker_does_not_duplicate_events_on_transient_reflect_failure():
+    """Regression test for the P0 retry-duplication bug.
+
+    When extraction succeeds but reflection raises ``LLMTransientError``,
+    the worker retries ``consolidate_session`` from the top. Without the
+    ``extracted_events`` guard, extraction runs a second time and commits
+    a duplicate set of event nodes. This test pins the fixed behavior:
+    one set of events regardless of how many reflection retries happen.
+
+    See develop-docs/initiatives/_active/2026-04-consolidate-retry-safety/.
+    """
+    engine = create_engine(":memory:")
+    create_all_tables(engine)
+    backend = SQLiteBackend(engine)
+    _seed(engine)
+    # "走了" is a strong-emotion keyword → skips trivial, forces extraction.
+    _add_closing_session(
+        engine,
+        "s_flaky_reflect",
+        [
+            "我今天心情糟透了",
+            "出了一件很难接受的事情",
+            "我爸突然走了",
+            "我还没缓过来",
+            "整个人都不对了",
+        ],
+    )
+
+    extract_calls: list[int] = []
+
+    async def extractor(_msgs):
+        extract_calls.append(1)
+        return [
+            ExtractedEvent(
+                description="user lost father suddenly",
+                # impact >= SHOCK_IMPACT_THRESHOLD (=8) forces reflection
+                emotional_impact=9,
+                emotion_tags=["grief"],
+            )
+        ]
+
+    reflect_attempts: list[int] = []
+
+    async def flaky_reflect(_nodes, _reason):
+        reflect_attempts.append(1)
+        if len(reflect_attempts) == 1:
+            raise LLMTransientError("reflect transient fail")
+        return []  # second attempt returns empty list, letting F commit
+
+    def db_factory():
+        return DbSession(engine)
+
+    worker = ConsolidateWorker(
+        db_factory=db_factory,
+        backend=backend,
+        extract_fn=extractor,
+        reflect_fn=flaky_reflect,
+        embed_fn=_embed,
+        max_retries=2,
+    )
+
+    import asyncio as _asyncio
+
+    orig_sleep = _asyncio.sleep
+
+    async def fast(_t):
+        return None
+
+    _asyncio.sleep = fast  # type: ignore[assignment]
+    try:
+        await worker.drain_once()
+    finally:
+        _asyncio.sleep = orig_sleep  # type: ignore[assignment]
+
+    with DbSession(engine) as db:
+        events = db.exec(
+            select(ConceptNode).where(
+                ConceptNode.source_session_id == "s_flaky_reflect",
+                ConceptNode.type == NodeType.EVENT,
+            )
+        ).all()
+
+        # THE BUG: without the fix, extraction runs twice → 2 events.
+        assert len(events) == 1, (
+            f"expected 1 event after transient reflect-retry, got {len(events)} "
+            f"— extraction duplicated the events on retry"
+        )
+        # Extraction should have run only once; reflection should have been
+        # attempted twice (the transient + the successful retry).
+        assert len(extract_calls) == 1
+        assert len(reflect_attempts) == 2
+
+        # Session should end up fully closed.
+        sess = db.get(Session, "s_flaky_reflect")
+        assert sess is not None
+        assert sess.status == SessionStatus.CLOSED
 
 
 async def test_worker_initial_session_ids_are_processed_first():

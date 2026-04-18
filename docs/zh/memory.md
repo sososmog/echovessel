@@ -154,7 +154,7 @@ idle > 30min OR 长度触发 OR 生命周期信号
 consolidate_session()             -- extract + reflect 之后 CLOSED
        |
        +-- A. trivial？跳过 extraction
-       +-- B. extract_fn(messages) -> L3 events
+       +-- B. extract_fn(messages) -> L3 events    [写入 extracted_events=True]
        +-- C. 任一 event 的 |impact| >= 8 -> SHOCK reflection
        +-- D. 距上次 reflection > 24h -> TIMER reflection
        +-- E. reflect_fn(recent events) -> L4 thoughts (硬闸门: 每 24h 最多 3 次)
@@ -165,6 +165,17 @@ on_session_closed 通过生命周期队列触发
 ```
 
 每一步都是在下一步开始前先 commit，observer 的 dispatch 严格位于把 `session.status` 改掉的那次 commit 之后。一次 consolidation 如果中途崩了，数据库仍然处于可恢复状态：session 停留在 `CLOSING`，下次启动时 catch-up pass 会把它捡回来，而一个从未真正关闭过的 session 绝不会触发生命周期 hook。
+
+### 重试安全
+
+B 阶段把抽取出来的 L3 events **与新的 `extracted_events=True` 标志位放在同一个事务里 commit**。如果 E 阶段（reflection）随后抛异常——瞬时 LLM 错误、超时、甚至 `SIGTERM`——worker 会从头重试 `consolidate_session`。函数顶端的 guard 读取 `extracted_events`，**直接跳过 B 阶段**：已持久化的 events 从数据库加载出来，喂给 SHOCK/TIMER 判断，reflection 对着它们跑。每个 session 最多调用一次抽取 LLM，无论反思失败多少次。
+
+这个不变量在两个方向都成立：
+
+- `extracted=True` 蕴含 `extracted_events=True`（F 阶段只有在 B 阶段的 flag 已 commit 后才会运行）
+- `extracted_events=True` **不**蕴含 `extracted=True`——这正是中间断点的意义所在
+
+处于 `extracted_events=True, status=CLOSING` 状态的 session 会被 worker 安全地重试；被推到 `FAILED` 状态的 session（`consolidate_worker._mark_failed` 的兜底分支）是终态，不会自动重试，需要管理员介入才能重置。
 
 ### Schema 迁移
 

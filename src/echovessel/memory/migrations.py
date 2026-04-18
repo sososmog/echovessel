@@ -73,6 +73,16 @@ _V0_3_COLUMNS: tuple[_ColumnSpec, ...] = (
     _ColumnSpec(table="recall_messages", column="turn_id", sql_type="TEXT"),
     _ColumnSpec(table="concept_nodes", column="source_turn_id", sql_type="TEXT"),
     _ColumnSpec(table="concept_nodes", column="imported_from", sql_type="TEXT"),
+    # Consolidate retry-safety (2026-04 P0 fix): resume point flag so a
+    # transient reflection failure doesn't re-run extraction.
+    _ColumnSpec(
+        table="sessions",
+        column="extracted_events",
+        sql_type="BOOLEAN NOT NULL DEFAULT 0",
+    ),
+    _ColumnSpec(
+        table="sessions", column="extracted_events_at", sql_type="DATETIME"
+    ),
 )
 
 

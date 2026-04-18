@@ -222,6 +222,13 @@ async def consolidate_session(
             session=session, skipped=True, events_created=[], thoughts_created=[], reflection_reason=None
         )
 
+    # Resume-point guard: if a prior attempt already committed the
+    # extraction phase but failed before F (e.g. transient reflection
+    # error), skip B on this run and load the persisted events for the
+    # downstream SHOCK / reflection stages. See
+    # `develop-docs/initiatives/_active/2026-04-consolidate-retry-safety/`.
+    skip_extraction = session.extracted_events
+
     # --- Load messages --------------------------------------------------
     messages = list(
         db.exec(
@@ -235,7 +242,9 @@ async def consolidate_session(
     )
 
     # --- A. Trivial skip ------------------------------------------------
-    if is_trivial(
+    # Only re-evaluate trivial on a fresh run; if extracted_events is
+    # already set, the prior attempt decided this session was NOT trivial.
+    if not skip_extraction and is_trivial(
         session,
         messages,
         trivial_message_count=trivial_message_count,
@@ -257,53 +266,76 @@ async def consolidate_session(
         )
 
     # --- B. Extraction --------------------------------------------------
-    extracted_events = await extract_fn(messages) if messages else []
     created_events: list[ConceptNode] = []
-    for ev in extracted_events:
-        # Review R2: per-session extraction is preserved. `source_turn_id`
-        # is an OPTIONAL soft hint from the LLM — if missing, fall back
-        # to the last user turn in the session that has a turn_id, so
-        # downstream audit ("what turn did this come from?") still has
-        # something to point at. If no message in the session has a
-        # turn_id (e.g. legacy data), leave it None.
-        effective_source_turn_id = ev.source_turn_id or _fallback_source_turn_id(
-            messages
-        )
-        node = ConceptNode(
-            persona_id=session.persona_id,
-            user_id=session.user_id,
-            type=NodeType.EVENT,
-            description=ev.description,
-            emotional_impact=ev.emotional_impact,
-            emotion_tags=ev.emotion_tags,
-            relational_tags=ev.relational_tags,
-            source_session_id=session.id,
-            source_turn_id=effective_source_turn_id,
-        )
-        db.add(node)
-        db.flush()
-        created_events.append(node)
-
-        # Embed + index into the vector table
-        vec = embed_fn(ev.description)
-        backend.insert_vector(node.id, vec)
-
-    # Commit events so reflection can see them
-    db.commit()
-    for n in created_events:
-        db.refresh(n)
-
-    # Post-commit observer notifications for created events
-    if observer is not None and created_events:
-        for n in created_events:
-            try:
-                observer.on_event_created(n)
-            except Exception as e:  # noqa: BLE001
-                log.warning(
-                    "observer.on_event_created raised (event id=%s): %s",
-                    n.id,
-                    e,
+    if skip_extraction:
+        # Load already-committed events from the prior attempt. No LLM
+        # call, no new rows, no new vectors — just rehydrate what B
+        # already wrote so stages C / D / E can see them.
+        created_events = list(
+            db.exec(
+                select(ConceptNode)
+                .where(
+                    ConceptNode.source_session_id == session.id,
+                    ConceptNode.type == NodeType.EVENT,
+                    ConceptNode.deleted_at.is_(None),  # type: ignore[union-attr]
                 )
+                .order_by(ConceptNode.created_at)
+            )
+        )
+    else:
+        extracted_events = await extract_fn(messages) if messages else []
+        for ev in extracted_events:
+            # Review R2: per-session extraction is preserved. `source_turn_id`
+            # is an OPTIONAL soft hint from the LLM — if missing, fall back
+            # to the last user turn in the session that has a turn_id, so
+            # downstream audit ("what turn did this come from?") still has
+            # something to point at. If no message in the session has a
+            # turn_id (e.g. legacy data), leave it None.
+            effective_source_turn_id = ev.source_turn_id or _fallback_source_turn_id(
+                messages
+            )
+            node = ConceptNode(
+                persona_id=session.persona_id,
+                user_id=session.user_id,
+                type=NodeType.EVENT,
+                description=ev.description,
+                emotional_impact=ev.emotional_impact,
+                emotion_tags=ev.emotion_tags,
+                relational_tags=ev.relational_tags,
+                source_session_id=session.id,
+                source_turn_id=effective_source_turn_id,
+            )
+            db.add(node)
+            db.flush()
+            created_events.append(node)
+
+            # Embed + index into the vector table
+            vec = embed_fn(ev.description)
+            backend.insert_vector(node.id, vec)
+
+        # Atomic: events + the resume-point flag commit together. If this
+        # commit fails, neither the nodes nor the flag persist, and the
+        # next retry re-enters this branch cleanly.
+        session.extracted_events = True
+        session.extracted_events_at = now
+        db.add(session)
+        db.commit()
+        for n in created_events:
+            db.refresh(n)
+
+        # Post-commit observer notifications for created events — only on
+        # the fresh-extraction path; the skip branch already fired these
+        # on the prior attempt.
+        if observer is not None and created_events:
+            for n in created_events:
+                try:
+                    observer.on_event_created(n)
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "observer.on_event_created raised (event id=%s): %s",
+                        n.id,
+                        e,
+                    )
 
     # --- C. SHOCK trigger ----------------------------------------------
     shock_event: ConceptNode | None = None

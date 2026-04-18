@@ -69,7 +69,67 @@ def test_migrations_v03_columns_present_after_create_all():
 
     recall_cols = _column_names(engine, "recall_messages")
     concept_cols = _column_names(engine, "concept_nodes")
+    sessions_cols = _column_names(engine, "sessions")
 
     assert "turn_id" in recall_cols
     assert "source_turn_id" in concept_cols
     assert "imported_from" in concept_cols
+    # Retry-safety columns (2026-04 P0 fix)
+    assert "extracted_events" in sessions_cols
+    assert "extracted_events_at" in sessions_cols
+
+
+def test_migrations_upgrade_legacy_db_without_retry_safety_columns():
+    """Simulate a pre-retry-safety DB: drop the two new sessions columns,
+    then re-run ``ensure_schema_up_to_date`` and assert they're added.
+
+    Proves the ``ALTER TABLE`` path (not just ``CREATE TABLE``) is in
+    play for existing deployments upgrading to this build.
+    """
+    engine = create_engine(":memory:")
+    create_all_tables(engine)
+
+    # SQLite can't drop columns portably pre-3.35; simulate a legacy
+    # schema by re-creating the sessions table without the new columns.
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE sessions RENAME TO sessions_new"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE sessions (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    persona_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_message_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    closed_at DATETIME,
+                    extracted BOOLEAN NOT NULL DEFAULT 0,
+                    extracted_at DATETIME,
+                    trivial BOOLEAN NOT NULL DEFAULT 0,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    close_trigger TEXT,
+                    deleted_at DATETIME,
+                    FOREIGN KEY(persona_id) REFERENCES personas (id),
+                    FOREIGN KEY(user_id) REFERENCES users (id)
+                )
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE sessions_new"))
+
+    legacy_cols = _column_names(engine, "sessions")
+    assert "extracted_events" not in legacy_cols
+    assert "extracted_events_at" not in legacy_cols
+
+    ensure_schema_up_to_date(engine)
+
+    upgraded_cols = _column_names(engine, "sessions")
+    assert "extracted_events" in upgraded_cols
+    assert "extracted_events_at" in upgraded_cols
+
+    # Re-running must be a no-op.
+    ensure_schema_up_to_date(engine)
+    assert _column_names(engine, "sessions") == upgraded_cols

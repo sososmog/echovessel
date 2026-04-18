@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
 from sqlmodel import Session as DbSession
 from sqlmodel import select
 
@@ -573,3 +574,137 @@ async def test_already_closed_session_is_noop():
 
         assert result.skipped is True
         assert called == []
+
+
+# ---------------------------------------------------------------------------
+# Retry safety (P0 fix — 2026-04-consolidate-retry-safety)
+# ---------------------------------------------------------------------------
+
+
+async def test_consolidate_skips_extraction_when_already_extracted():
+    """If a prior attempt committed the extraction phase, a retry must
+    load those events instead of re-running the extractor.
+
+    This is the positive side of the retry-safety P0 fix — proves the
+    skip-B branch loads persisted events and feeds them to reflection
+    without ever invoking ``extract_fn``.
+    """
+    engine = create_engine(":memory:")
+    create_all_tables(engine)
+    backend = SQLiteBackend(engine)
+
+    with DbSession(engine) as db:
+        _seed(db)
+        # Simulate a session where B already ran on a prior attempt:
+        # events are persisted and extracted_events flag is set, but
+        # reflection never finished so the session is still CLOSING.
+        sess = Session(
+            id="s_resume",
+            persona_id="p_test",
+            user_id="self",
+            channel_id="test",
+            status=SessionStatus.CLOSING,
+            message_count=5,
+            total_tokens=500,
+            extracted_events=True,
+        )
+        db.add(sess)
+        db.commit()
+        _add_messages(db, "s_resume", ["a" * 40, "b" * 40, "c" * 40, "d" * 40, "e" * 40])
+
+        pre_existing = ConceptNode(
+            persona_id="p_test",
+            user_id="self",
+            type=NodeType.EVENT,
+            description="pre-existing event from prior attempt",
+            emotional_impact=5,
+            source_session_id="s_resume",
+        )
+        db.add(pre_existing)
+        db.commit()
+        db.refresh(pre_existing)
+
+        async def must_not_be_called(_msgs):
+            raise AssertionError(
+                "extract_fn must not be called when extracted_events=True"
+            )
+
+        result = await consolidate_session(
+            db=db,
+            backend=backend,
+            session=sess,
+            extract_fn=must_not_be_called,
+            reflect_fn=_empty_reflect,
+            embed_fn=_deterministic_embed,
+        )
+
+        # No new events were created (the existing one was loaded from
+        # the DB, not re-extracted).
+        events = db.exec(
+            select(ConceptNode).where(
+                ConceptNode.source_session_id == "s_resume",
+                ConceptNode.type == NodeType.EVENT,
+            )
+        ).all()
+        assert len(events) == 1
+        assert events[0].id == pre_existing.id
+
+        # Session is now fully closed after F.
+        assert result.skipped is False
+        assert sess.status == SessionStatus.CLOSED
+        assert sess.extracted is True
+
+
+async def test_consolidate_sets_extracted_events_flag_before_reflection():
+    """The ``extracted_events`` flag must be persisted in the same commit
+    as the B-phase events, so a reflection failure (even a raise) leaves
+    the session in a state where the next retry will skip B.
+    """
+    engine = create_engine(":memory:")
+    create_all_tables(engine)
+    backend = SQLiteBackend(engine)
+
+    with DbSession(engine) as db:
+        _seed(db)
+        sess = _make_session(db)
+        _add_messages(
+            db,
+            "s_test",
+            ["我今天心情糟透了", "我爸走了", "我缓不过来", "真的很难", "整个人不对"],
+        )
+
+        async def extractor(_msgs):
+            return [
+                ExtractedEvent(
+                    description="user lost father suddenly",
+                    # Forces SHOCK trigger → reflection runs
+                    emotional_impact=9,
+                    emotion_tags=["grief"],
+                )
+            ]
+
+        async def exploding_reflect(_nodes, _reason):
+            raise RuntimeError("reflection blew up mid-flight")
+
+        with pytest.raises(RuntimeError, match="reflection blew up"):
+            await consolidate_session(
+                db=db,
+                backend=backend,
+                session=sess,
+                extract_fn=extractor,
+                reflect_fn=exploding_reflect,
+                embed_fn=_deterministic_embed,
+            )
+
+    # Re-open the DB so we read the persisted state, not the in-memory
+    # transaction that the failed call was using.
+    with DbSession(engine) as db:
+        saved = db.get(Session, "s_test")
+        assert saved is not None
+        assert saved.extracted_events is True, (
+            "flag must persist across reflection failure so retry skips B"
+        )
+        assert saved.extracted_events_at is not None
+        # F never ran.
+        assert saved.status == SessionStatus.CLOSING
+        assert saved.extracted is False
