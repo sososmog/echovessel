@@ -168,6 +168,24 @@ on_session_closed 通过生命周期队列触发
 
 每一步都是在下一步开始前先 commit，observer 的 dispatch 严格位于把 `session.status` 改掉的那次 commit 之后。一次 consolidation 如果中途崩了，数据库仍然处于可恢复状态：session 停留在 `CLOSING`，下次启动时 catch-up pass 会把它捡回来，而一个从未真正关闭过的 session 绝不会触发生命周期 hook。
 
+### 触发条件与阈值
+
+上面那张流程图里每个数值都是模块级常量，不是 config 可调项:
+
+| 迁移 | 触发 | 位置 | 常量 |
+| --- | --- | --- | --- |
+| L2 → (关 session) | idle 超时 | `memory/sessions.py` | `SESSION_IDLE_MINUTES = 30` |
+| L2 → (关 session) | 长度上限 | `memory/sessions.py` | `SESSION_MAX_MESSAGES = 200` · `SESSION_MAX_TOKENS = 20_000` |
+| L2 → (关 session) | runtime 生命周期 | channels / catchup | — |
+| L3 → L4 | SHOCK — 新 event 撞到 impact 地板 | `memory/consolidate.py` | `SHOCK_IMPACT_THRESHOLD = 8`(取绝对值) |
+| L3 → L4 | TIMER — 最近没有 reflection | `memory/consolidate.py` | `TIMER_REFLECTION_HOURS = 24` |
+| L3 → L4(闸门) | 24h 反思上限 | `memory/consolidate.py` | `REFLECTION_HARD_LIMIT_24H = 3` |
+
+两个新读者常绊的点:
+
+- **驱动 SHOCK 的 `emotional_impact` 是抽取 LLM 自己给的**,不是另一个分类器。extraction prompt 要求模型对每条 event 输出 `[-10, +10]` 的带符号整数,consolidate 只是对本次新写的 events 算一个 `max(|impact|) >= 8`。prompt 里 `-7 = 严重失去 / 悲伤`、`+7 = 重大正面里程碑`是锚点(见 `prompts/extraction.py`)。
+- **SHOCK 和 TIMER 是 OR · hard gate 叠在外层 AND。** 规则是:"如果 (shock OR timer_due) 成立 · 除非过去 24h 已经 3 条 thought · 那就 reflect"。gate 是防止一整天情绪密集的对话把 reflection 账单推到无底洞。
+
 ### 重试安全
 
 B 阶段把抽取出来的 L3 events **与新的 `extracted_events=True` 标志位放在同一个事务里 commit**。如果 E 阶段（reflection）随后抛异常——瞬时 LLM 错误、超时、甚至 `SIGTERM`——worker 会从头重试 `consolidate_session`。函数顶端的 guard 读取 `extracted_events`，**直接跳过 B 阶段**：已持久化的 events 从数据库加载出来，喂给 SHOCK/TIMER 判断，reflection 对着它们跑。每个 session 最多调用一次抽取 LLM，无论反思失败多少次。

@@ -168,6 +168,24 @@ on_session_closed fires via the lifecycle queue
 
 Every step commits before the next one begins, and the observer dispatch sits strictly after the commit that transitioned `session.status`. A consolidation that crashes midway leaves the database in a recoverable state: the session stays in `CLOSING`, the next startup's catch-up pass picks it up, and no lifecycle hook fires for a session that was never really closed.
 
+### Triggers and thresholds
+
+The numeric thresholds that shape the flow above are module-level constants, not config knobs:
+
+| Transition | Trigger | Where | Constant(s) |
+| --- | --- | --- | --- |
+| L2 → (close) | idle timeout | `memory/sessions.py` | `SESSION_IDLE_MINUTES = 30` |
+| L2 → (close) | length cap | `memory/sessions.py` | `SESSION_MAX_MESSAGES = 200`, `SESSION_MAX_TOKENS = 20_000` |
+| L2 → (close) | runtime lifecycle | channels / catchup | — |
+| L3 → L4 | SHOCK — any new event crosses the impact floor | `memory/consolidate.py` | `SHOCK_IMPACT_THRESHOLD = 8` (absolute value) |
+| L3 → L4 | TIMER — no recent reflection | `memory/consolidate.py` | `TIMER_REFLECTION_HOURS = 24` |
+| L3 → L4 (gate) | cap reflections per 24 h | `memory/consolidate.py` | `REFLECTION_HARD_LIMIT_24H = 3` |
+
+Two things worth calling out because they trip new readers:
+
+- **The `emotional_impact` that drives SHOCK is produced by the extraction LLM itself**, not by a separate classifier. Each event it emits must carry a signed integer in `[-10, +10]`; consolidate just checks `max(|impact|) >= 8` over the events that were just written. The extraction prompt (`prompts/extraction.py`) tells the model how to use the scale, with `-7 = serious loss / grief` and `+7 = major positive milestone` as anchor points.
+- **SHOCK and TIMER are OR'd; the hard gate is AND'd on top.** The rule is "run reflection if (shock OR timer_due), UNLESS three thoughts already landed in the last 24 h". The gate protects against a single emotionally dense day racking up an unbounded reflection bill.
+
 ### Retry safety
 
 Stage B commits the extracted L3 events **in the same transaction** as a new `extracted_events=True` flag on the session. If stage E (reflection) then raises — a transient LLM error, a timeout, even `SIGTERM` — the worker retries `consolidate_session` from the top. The top-of-function guard reads `extracted_events` and skips B entirely: already-persisted events are loaded from the database, fed into SHOCK/TIMER detection, and reflection runs against them. Extraction LLM calls are therefore run at most once per session, regardless of how many times reflection fails.
