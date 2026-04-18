@@ -84,6 +84,7 @@ uv run echovessel run          # 首次启动会自动打开 http://localhost:77
 | --- | --- |
 | 🔧 [configuration.md](./configuration.md) | `config.toml` 的每个字段 · 默认值 · 合法值 · 何时改 |
 | 🛠 [contributing.md](./contributing.md) | Clone · `uv sync` · 跑测试 · PR 流程 · 每次贡献都必须守住的两条铁律 |
+| 🧪 [memory-testing.md](./memory-testing.md) | Memory 测试套件钉住了什么 · 按 ingest 到 retrieve 的流程逐层列清楚 · 外加 live-LLM eval 层 |
 
 ---
 

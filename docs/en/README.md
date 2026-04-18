@@ -84,6 +84,7 @@ Each module gets exactly one page. Read in any order — pages cross-link where 
 | --- | --- |
 | 🔧 [configuration.md](./configuration.md) | Every field in `config.toml`. Defaults, valid values, when to change |
 | 🛠 [contributing.md](./contributing.md) | Clone, `uv sync`, run tests, PR flow, and the two ironrules every contribution must respect |
+| 🧪 [memory-testing.md](./memory-testing.md) | What the memory test suite pins · stage-by-stage from ingest to retrieve · plus the live-LLM eval layer |
 
 ---
 
