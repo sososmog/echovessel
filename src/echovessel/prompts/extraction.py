@@ -69,9 +69,10 @@ session is in English, mixed if the session is mixed). Describe what the
 user disclosed, not what the persona replied. Use third-person reference
 to the user: "用户..." / "the user..." rather than "you".
 
-## emotional_impact: integer in [-10, +10]
-A SIGNED integer. This scale measures how emotionally weighty the memory
-is, not how positive it is. Use the WHOLE range.
+## emotional_impact: integer in the range -10 to 10
+A signed integer. This scale measures how emotionally weighty the memory
+is, not how positive it is. Use the WHOLE range. Negative values for
+loss / pain / stress, positive values for joy / milestones / connection.
 
   -10   catastrophic loss, trauma, crisis (death of close family,
         suicidal ideation voiced, violence disclosed)
@@ -82,20 +83,27 @@ is, not how positive it is. Use the WHOLE range.
   -1    mild low, slight frustration (bad commute, minor annoyance)
    0    pure neutral fact with no emotional valence (rare — most
         things a user bothers to share have SOME valence)
-  +1    mild pleasant (nice weather, good meal)
-  +4    meaningful joy, satisfaction, connection (promotion at work,
+   1    mild pleasant (nice weather, good meal)
+   4    meaningful joy, satisfaction, connection (promotion at work,
         fun weekend with friends, first real laugh in weeks)
-  +7    major positive milestone (engagement, big win, deep reconciliation)
-  +10   life-defining joy (birth of child, surviving a crisis, long-
+   7    major positive milestone (engagement, big win, deep reconciliation)
+  10    life-defining joy (birth of child, surviving a crisis, long-
         awaited reunion)
 
-Rules:
-  - Never output a decimal. Never output a value outside [-10, +10].
+JSON encoding rules — STRICT:
+  - Positive numbers MUST be plain digits. Write `4`, NOT `+4`. JSON
+    does not accept `+` before numbers; including it makes the whole
+    output unparseable and the event is dropped.
+  - Negative numbers MUST use the minus sign, e.g. `-7`.
+  - Never output a decimal. Integers only.
+  - Never output a value outside the range -10 to 10.
   - Never output 0 alongside a positive/negative field — 0 means truly
     flat, use it sparingly.
-  - The SIGN matters. "用户妈妈去世了" is -9, not +9. "用户刚结婚" is
-    +9, not -9. Grief and joy have opposite signs.
-  - Do not inflate. A pleasant dinner is +2, not +8. Inflation destroys
+
+Sign semantics:
+  - Sign matters. "用户妈妈去世了" is -9, not 9. "用户刚结婚" is 9,
+    not -9. Grief and joy have opposite signs.
+  - Do not inflate. A pleasant dinner is 2, not 8. Inflation destroys
     the SHOCK reflection trigger because EVERYTHING looks like SHOCK.
 
 ## emotion_tags: list of strings (FREE-FORM, 0 to 4 tags)
