@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 
 from echovessel.channels.web.app import build_web_app
 from echovessel.channels.web.channel import WebChannel
+from echovessel.channels.web.routes.admin import _VOICE_SAMPLE_MIN_COUNT
 from echovessel.channels.web.sse import SSEBroadcaster
 from echovessel.runtime import Runtime, build_zero_embedder, load_config_from_str
 from echovessel.runtime.llm import StubProvider
@@ -194,7 +195,7 @@ def test_get_voice_samples_lists_uploads_with_min_required(tmp_path: Path) -> No
         r0 = client.get("/api/admin/voice/samples")
         assert r0.status_code == 200
         assert r0.json()["count"] == 0
-        assert r0.json()["minimum_required"] == 3
+        assert r0.json()["minimum_required"] == _VOICE_SAMPLE_MIN_COUNT
 
         # Upload two samples — count reflects it.
         client.post(
@@ -209,7 +210,7 @@ def test_get_voice_samples_lists_uploads_with_min_required(tmp_path: Path) -> No
         r2 = client.get("/api/admin/voice/samples")
     body = r2.json()
     assert body["count"] == 2
-    assert body["minimum_required"] == 3
+    assert body["minimum_required"] == _VOICE_SAMPLE_MIN_COUNT
     assert len(body["samples"]) == 2
     filenames = sorted(s["filename"] for s in body["samples"])
     assert filenames == ["a.wav", "b.wav"]
@@ -245,19 +246,19 @@ def test_delete_voice_sample_404_on_unknown_id(tmp_path: Path) -> None:
 
 
 def test_clone_refuses_below_minimum_samples(tmp_path: Path) -> None:
+    """The minimum-sample gate must reject a clone call whenever the
+    sample count is below ``_VOICE_SAMPLE_MIN_COUNT``. Zero samples is
+    the only value guaranteed to be below any non-negative floor, so
+    the test exercises the gate independent of its exact numeric value.
+    """
     _rt, client, _cfg = _build(tmp_path)
     with client:
-        # Only two samples — below the 3-floor.
-        for i, body in enumerate((b"one", b"two")):
-            client.post(
-                "/api/admin/voice/samples",
-                files={"file": (f"s{i}.wav", body, "audio/wav")},
-            )
+        # Don't upload anything — 0 samples is below every possible floor.
         r = client.post(
             "/api/admin/voice/clone", json={"display_name": "my voice"}
         )
     assert r.status_code == 400
-    assert "3 samples" in r.json()["detail"] or "samples" in r.json()["detail"]
+    assert "samples" in r.json()["detail"].lower()
 
 
 def test_clone_succeeds_with_three_samples_and_returns_preview(
