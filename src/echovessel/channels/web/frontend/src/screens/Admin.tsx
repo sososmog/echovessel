@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import type { AdminTab } from '../types'
@@ -33,13 +34,15 @@ interface AdminProps {
   onBackToChat: () => void
 }
 
-const TABS: { id: AdminTab; label: string; sub: string }[] = [
-  { id: 'persona', label: '人格', sub: 'persona · 5 blocks' },
-  { id: 'events', label: '发生过的事', sub: 'events · L3' },
-  { id: 'thoughts', label: '长期印象', sub: 'thoughts · L4' },
-  { id: 'voice', label: '声音', sub: 'voice toggle' },
-  { id: 'cost', label: '成本', sub: 'cost · 30d' },
-  { id: 'config', label: '配置', sub: 'coming soon' },
+type TabDef = { id: AdminTab; labelKey: string; sub: string }
+
+const TABS: TabDef[] = [
+  { id: 'persona', labelKey: 'admin.tabs.persona', sub: 'persona · 5 blocks' },
+  { id: 'events', labelKey: 'admin.tabs.events', sub: 'events · L3' },
+  { id: 'thoughts', labelKey: 'admin.tabs.thoughts', sub: 'thoughts · L4' },
+  { id: 'voice', labelKey: 'admin.tabs.voice', sub: 'voice toggle' },
+  { id: 'cost', labelKey: 'admin.tabs.cost', sub: 'cost · 30d' },
+  { id: 'config', labelKey: 'admin.tabs.config', sub: 'config' },
 ]
 
 // Shared shape for the cross-tab "jump-to-lineage" flow:
@@ -57,6 +60,7 @@ export function Admin({
   toggleVoice,
   onBackToChat,
 }: AdminProps) {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<AdminTab>('persona')
   // Pending highlight set by a cross-tab jump. The target tab reads
   // this, scrolls its row into view, flashes it briefly, then clears.
@@ -75,8 +79,8 @@ export function Admin({
   return (
     <div className="admin-wrap">
       <TopBar
-        mood="在 admin 页面"
-        back={{ label: '对话', onClick: onBackToChat }}
+        mood={t('admin.subtitle_prefix')}
+        back={{ label: t('topbar.back_to_chat'), onClick: onBackToChat }}
       />
 
       <ChannelStatusStrip channels={daemonState.channels} />
@@ -84,19 +88,19 @@ export function Admin({
       <div className="admin-layout">
         <aside className="admin-nav">
           <div className="admin-nav-heading">
-            <div className="admin-nav-heading-label">管理</div>
+            <div className="admin-nav-heading-label">{t('admin.page_title')}</div>
             <div className="admin-nav-heading-sub">Admin</div>
           </div>
           <ul className="admin-nav-list">
-            {TABS.map((t) => (
-              <li key={t.id}>
+            {TABS.map((tab_def) => (
+              <li key={tab_def.id}>
                 <button
                   type="button"
-                  className={`admin-nav-item ${tab === t.id ? 'is-active' : ''}`}
-                  onClick={() => setTab(t.id)}
+                  className={`admin-nav-item ${tab === tab_def.id ? 'is-active' : ''}`}
+                  onClick={() => setTab(tab_def.id)}
                 >
-                  <div className="admin-nav-item-label">{t.label}</div>
-                  <div className="admin-nav-item-sub">{t.sub}</div>
+                  <div className="admin-nav-item-label">{t(tab_def.labelKey)}</div>
+                  <div className="admin-nav-item-sub">{tab_def.sub}</div>
                 </button>
               </li>
             ))}
@@ -155,19 +159,23 @@ function ChannelStatusStrip({ channels }: { channels: ChannelStatus[] }) {
 }
 
 function ChannelStatusPill({ channel }: { channel: ChannelStatus }) {
+  const { t } = useTranslation()
   // Dot color: green if ready, orange if enabled-but-not-ready
   // (handshake in progress / transient disconnect), grey if disabled.
   let tone: 'on' | 'warming' | 'off'
   let label: string
   if (!channel.enabled) {
     tone = 'off'
-    label = '未启用'
+    label = t('admin.channel_status.disabled')
   } else if (!channel.ready) {
     tone = 'warming'
-    label = '连接中'
+    label = t('admin.channel_status.connecting')
   } else {
     tone = 'on'
-    label = channel.channel_id === 'discord' ? '已连接' : '就绪'
+    label =
+      channel.channel_id === 'discord'
+        ? t('admin.channel_status.connected')
+        : t('admin.channel_status.ready')
   }
   return (
     <span
@@ -189,44 +197,44 @@ type ShortKey = 'persona' | 'self' | 'user' | 'relationship' | 'mood'
 
 interface BlockMeta {
   shortKey: ShortKey
-  label: string
+  labelKey: string
   engName: string
-  hint: string
-  warning?: string
+  hintKey: string
+  warningKey?: string
   small?: boolean
 }
 
 const BLOCK_META: BlockMeta[] = [
   {
     shortKey: 'persona',
-    label: '这个 persona 是谁',
+    labelKey: 'admin.persona_blocks.persona_label',
     engName: 'persona_block',
-    hint: '改这里 = 调整 persona 的人格基调。下一条消息开始生效。',
+    hintKey: 'admin.persona_blocks.persona_hint',
   },
   {
     shortKey: 'self',
-    label: 'persona 对自己的认知',
+    labelKey: 'admin.persona_blocks.self_label',
     engName: 'self_block',
-    hint: '改这里 = 改写 persona 对自己的自我叙事。通常由反思自动积累，大多数时候不用手动改。',
+    hintKey: 'admin.persona_blocks.self_hint',
   },
   {
     shortKey: 'user',
-    label: 'persona 知道的你',
+    labelKey: 'admin.persona_blocks.user_label',
     engName: 'user_block',
-    hint: '改这里 = 改 persona 对你的身份级认知（职业、家庭、长期爱好）。',
+    hintKey: 'admin.persona_blocks.user_hint',
   },
   {
     shortKey: 'relationship',
-    label: 'persona 知道的你身边的人',
+    labelKey: 'admin.persona_blocks.relationship_label',
     engName: 'relationship_block',
-    hint: '改这里 = 改 persona 对你身边人的理解。按人物分组。',
+    hintKey: 'admin.persona_blocks.relationship_hint',
   },
   {
     shortKey: 'mood',
-    label: 'persona 此刻的情绪',
+    labelKey: 'admin.persona_blocks.mood_label',
     engName: 'mood_block',
-    hint: '改这里 = 临时调整 persona 的当前情绪。',
-    warning: '下次对话结束后 runtime 会自动刷新覆盖。',
+    hintKey: 'admin.persona_blocks.mood_hint',
+    warningKey: 'admin.persona_blocks.mood_warning',
     small: true,
   },
 ]
@@ -238,6 +246,7 @@ function PersonaTab({
   persona: PersonaStateApi
   onUpdate: (payload: PersonaUpdatePayload) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [nameDraft, setNameDraft] = useState(persona.display_name)
   const [nameSaving, setNameSaving] = useState(false)
@@ -260,23 +269,27 @@ function PersonaTab({
   return (
     <div className="admin-section">
       <div className="admin-section-head">
-        <h1 className="admin-section-title">人格</h1>
+        <h1 className="admin-section-title">
+          {t('admin.persona_blocks.section_title')}
+        </h1>
         <p className="admin-section-lead">
-          persona 的 5 个"长期画像"。改这些会直接影响下次对话时 persona 的行为。
+          {t('admin.persona_blocks.section_lead')}
         </p>
       </div>
 
       <div className="admin-name-row">
         <label className="admin-name-label">
-          显示名
-          <span className="admin-name-hint">persona 在 Web / Discord / 任何 channel 上的称呼</span>
+          {t('admin.persona_blocks.display_name')}
+          <span className="admin-name-hint">
+            {t('admin.persona_blocks.display_name_hint')}
+          </span>
         </label>
         <div className="admin-name-controls">
           <input
             className="admin-name-input"
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
-            placeholder="她"
+            placeholder={t('onboarding.name_placeholder')}
             maxLength={256}
             disabled={nameSaving}
           />
@@ -286,7 +299,11 @@ function PersonaTab({
             disabled={!nameDirty || nameSaving || !nameDraft.trim()}
             onClick={() => void handleSaveName()}
           >
-            {nameSaving ? '⋯' : nameSavedAt ? '已保存 ✓' : '改名'}
+            {nameSaving
+              ? '⋯'
+              : nameSavedAt
+                ? t('admin.common.saved')
+                : t('admin.persona_blocks.display_name_rename')}
           </button>
         </div>
       </div>
@@ -294,19 +311,22 @@ function PersonaTab({
       <div className="admin-hint-card">
         <div className="admin-hint-glyph">📥</div>
         <div className="admin-hint-body">
-          <div className="admin-hint-title">有历史材料想让 persona 记住？</div>
-          <div className="admin-hint-desc">
-            聊天记录、日记、文档——<strong>导入器</strong>
-            会让 LLM 读完之后，把具体事件、身边的人、
-            你身上的事实分别写到对应的记忆层。
+          <div className="admin-hint-title">
+            {t('admin.persona_blocks.import_prompt')}
           </div>
+          <div
+            className="admin-hint-desc"
+            dangerouslySetInnerHTML={{
+              __html: t('admin.persona_blocks.import_body'),
+            }}
+          />
         </div>
         <button
           type="button"
           className="admin-hint-btn"
           onClick={() => navigate('/admin/import')}
         >
-          导入历史材料 →
+          {t('admin.persona_blocks.import_cta')}
         </button>
       </div>
 
@@ -337,6 +357,7 @@ function BlockEditor({
   value: string
   onSave: (next: string) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState(value)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
@@ -357,12 +378,12 @@ function BlockEditor({
     <section className="block-editor">
       <header className="block-editor-head">
         <div className="block-editor-label-row">
-          <h3 className="block-editor-label">{meta.label}</h3>
+          <h3 className="block-editor-label">{t(meta.labelKey)}</h3>
           <span className="block-editor-engname">{meta.engName}</span>
         </div>
-        <p className="block-editor-hint">{meta.hint}</p>
-        {meta.warning && (
-          <p className="block-editor-warning">⚠ {meta.warning}</p>
+        <p className="block-editor-hint">{t(meta.hintKey)}</p>
+        {meta.warningKey && (
+          <p className="block-editor-warning">⚠ {t(meta.warningKey)}</p>
         )}
       </header>
       <textarea
@@ -370,18 +391,28 @@ function BlockEditor({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         rows={meta.small ? 2 : 6}
-        placeholder={meta.small ? '（留空会随对话自动演变）' : '还没写。'}
+        placeholder={
+          meta.small
+            ? t('admin.persona_blocks.placeholder_small')
+            : t('admin.persona_blocks.placeholder_default')
+        }
         disabled={saving}
       />
       <div className="block-editor-actions">
         <div className="block-editor-status">
-          {savedAt && <span className="block-editor-saved">已保存 ✓</span>}
+          {savedAt && (
+            <span className="block-editor-saved">{t('admin.common.saved')}</span>
+          )}
           {!savedAt && dirty && (
-            <span className="block-editor-dirty">有未保存的修改</span>
+            <span className="block-editor-dirty">
+              {t('admin.common.unsaved_warning')}
+            </span>
           )}
           {!savedAt && !dirty && (
             <span className="block-editor-count">
-              {draft.length.toLocaleString()} 字
+              {t('admin.persona_blocks.char_count', {
+                count: draft.length,
+              })}
             </span>
           )}
         </div>
@@ -391,7 +422,7 @@ function BlockEditor({
           disabled={!dirty || saving}
           onClick={() => void handleSave()}
         >
-          {saving ? '⋯' : '保存'}
+          {saving ? '⋯' : t('admin.common.save')}
         </button>
       </div>
     </section>
@@ -409,6 +440,7 @@ interface TraceTabProps {
 }
 
 function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
+  const { t } = useTranslation()
   const {
     items,
     total,
@@ -425,7 +457,7 @@ function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
   const handleDelete = async (item: MemoryEvent) => {
     try {
       const preview = await previewDelete(item.id)
-      const choice = await confirmDelete(item.description, preview)
+      const choice = await confirmDelete(item.description, preview, t)
       if (choice === null) return
       await deleteEvent(item.id, choice)
     } catch (err) {
@@ -449,13 +481,17 @@ function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
     <div className="admin-section">
       <div className="admin-section-head">
         <div className="admin-section-title-row">
-          <h1 className="admin-section-title">发生过的事</h1>
+          <h1 className="admin-section-title">
+            {t('admin.events.section_title')}
+          </h1>
           <span className="admin-section-engname">events · L3</span>
         </div>
-        <p className="admin-section-lead">
-          persona 记得的具体事件。每一条带时间、情感强度、相关的人和情绪。
-          服务器上共 <strong>{total}</strong> 条。
-        </p>
+        <p
+          className="admin-section-lead"
+          dangerouslySetInnerHTML={{
+            __html: t('admin.events.lead', { count: total }),
+          }}
+        />
       </div>
 
       <MemorySearchBar
@@ -471,13 +507,17 @@ function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
 
       {showingSearch ? (
         search.loading && visibleItems.length === 0 ? (
-          <div className="memory-list-loading">搜索中…</div>
+          <div className="memory-list-loading">
+            {t('admin.events.searching')}
+          </div>
         ) : visibleTotal === 0 ? (
           <div className="memory-list-empty">
             <div className="memory-list-empty-glyph">🔍</div>
-            <div className="memory-list-empty-title">没有匹配的事件</div>
+            <div className="memory-list-empty-title">
+              {t('admin.events.no_match_title')}
+            </div>
             <p className="memory-list-empty-desc">
-              试试更宽泛的关键词,或者点"清除"返回完整列表。
+              {t('admin.events.no_match_body')}
             </p>
           </div>
         ) : (
@@ -497,14 +537,15 @@ function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
           </ul>
         )
       ) : loading && items.length === 0 ? (
-        <div className="memory-list-loading">载入中…</div>
+        <div className="memory-list-loading">{t('admin.events.loading')}</div>
       ) : total === 0 ? (
         <div className="memory-list-empty">
           <div className="memory-list-empty-glyph">📖</div>
-          <div className="memory-list-empty-title">persona 还没记得任何事</div>
+          <div className="memory-list-empty-title">
+            {t('admin.events.empty_title')}
+          </div>
           <p className="memory-list-empty-desc">
-            和 persona 多聊几轮，后台 consolidate 会把对话压缩成事件，
-            自动出现在这里。
+            {t('admin.events.empty_body')}
           </p>
         </div>
       ) : (
@@ -531,7 +572,11 @@ function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
             onClick={() => void loadMore()}
             disabled={loadingMore}
           >
-            {loadingMore ? '载入中…' : `加载更多（剩 ${total - items.length}）`}
+            {loadingMore
+              ? t('admin.events.loading_more')
+              : t('admin.events.load_more', {
+                  remaining: total - items.length,
+                })}
           </button>
         </div>
       )}
@@ -544,6 +589,7 @@ function EventsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
 // ═══════════════════════════════════════════════════════════
 
 function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
+  const { t } = useTranslation()
   const {
     items,
     total,
@@ -560,7 +606,7 @@ function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
   const handleDelete = async (item: MemoryThought) => {
     try {
       const preview = await previewDelete(item.id)
-      const choice = await confirmDelete(item.description, preview)
+      const choice = await confirmDelete(item.description, preview, t)
       if (choice === null) return
       await deleteThought(item.id, choice)
     } catch (err) {
@@ -579,14 +625,17 @@ function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
     <div className="admin-section">
       <div className="admin-section-head">
         <div className="admin-section-title-row">
-          <h1 className="admin-section-title">长期印象</h1>
+          <h1 className="admin-section-title">
+            {t('admin.thoughts.section_title')}
+          </h1>
           <span className="admin-section-engname">thoughts · L4</span>
         </div>
-        <p className="admin-section-lead">
-          persona 在很多次对话之后沉淀下来的、对你的高阶观察。
-          通常由反思模块自动生成，也可能来自导入的真实材料。
-          服务器上共 <strong>{total}</strong> 条。
-        </p>
+        <p
+          className="admin-section-lead"
+          dangerouslySetInnerHTML={{
+            __html: t('admin.thoughts.lead', { count: total }),
+          }}
+        />
       </div>
 
       <MemorySearchBar
@@ -602,13 +651,17 @@ function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
 
       {showingSearch ? (
         search.loading && visibleItems.length === 0 ? (
-          <div className="memory-list-loading">搜索中…</div>
+          <div className="memory-list-loading">
+            {t('admin.events.searching')}
+          </div>
         ) : visibleTotal === 0 ? (
           <div className="memory-list-empty">
             <div className="memory-list-empty-glyph">🔍</div>
-            <div className="memory-list-empty-title">没有匹配的印象</div>
+            <div className="memory-list-empty-title">
+              {t('admin.thoughts.no_match_title')}
+            </div>
             <p className="memory-list-empty-desc">
-              试试更宽泛的关键词,或者点"清除"返回完整列表。
+              {t('admin.thoughts.no_match_body')}
             </p>
           </div>
         ) : (
@@ -628,13 +681,15 @@ function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
           </ul>
         )
       ) : loading && items.length === 0 ? (
-        <div className="memory-list-loading">载入中…</div>
+        <div className="memory-list-loading">{t('admin.events.loading')}</div>
       ) : total === 0 ? (
         <div className="memory-list-empty">
           <div className="memory-list-empty-glyph">🪞</div>
-          <div className="memory-list-empty-title">还没有沉淀下来的印象</div>
+          <div className="memory-list-empty-title">
+            {t('admin.thoughts.empty_title')}
+          </div>
           <p className="memory-list-empty-desc">
-            等积累更多事件之后，反思模块会自动产出对你的高阶观察。
+            {t('admin.thoughts.empty_body')}
           </p>
         </div>
       ) : (
@@ -661,7 +716,11 @@ function ThoughtsTab({ highlightId, clearHighlight, crossNav }: TraceTabProps) {
             onClick={() => void loadMore()}
             disabled={loadingMore}
           >
-            {loadingMore ? '载入中…' : `加载更多（剩 ${total - items.length}）`}
+            {loadingMore
+              ? t('admin.events.loading_more')
+              : t('admin.events.load_more', {
+                  remaining: total - items.length,
+                })}
           </button>
         </div>
       )}
@@ -688,6 +747,7 @@ function MemorySearchBar({
   active,
   total,
 }: MemorySearchBarProps) {
+  const { t } = useTranslation()
   return (
     <div className="memory-search-bar">
       <span className="memory-search-icon" aria-hidden>
@@ -697,13 +757,15 @@ function MemorySearchBar({
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="搜索关键词…"
+        placeholder={t('admin.memory_list.search_placeholder')}
         className="memory-search-input"
-        aria-label="搜索 memory"
+        aria-label={t('admin.memory_list.search_aria')}
       />
       {active && (
         <span className="memory-search-meta">
-          {loading ? '搜索中…' : `${total} 条`}
+          {loading
+            ? t('admin.events.searching')
+            : t('admin.memory_list.count', { count: total })}
         </span>
       )}
       {value && (
@@ -711,9 +773,9 @@ function MemorySearchBar({
           type="button"
           className="memory-search-clear"
           onClick={onClear}
-          aria-label="清除搜索"
+          aria-label={t('admin.memory_list.clear_aria')}
         >
-          清除
+          {t('admin.memory_list.clear')}
         </button>
       )}
     </div>
@@ -767,6 +829,7 @@ function MemoryRow({
   crossNav,
   snippet,
 }: MemoryRowProps) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const liRef = useRef<HTMLLIElement | null>(null)
   const trace = useMemoryTrace({ kind, nodeId: item.id })
@@ -795,7 +858,9 @@ function MemoryRow({
     ? (item as MemoryEvent)
     : null
   const toggleLabel =
-    kind === 'thought' ? '📚 来源' : '🪞 印象'
+    kind === 'thought'
+      ? t('admin.memory_list.lineage_sources')
+      : t('admin.memory_list.lineage_thoughts')
 
   const expandedNodes: TraceNode[] = (() => {
     if (!trace.data) return []
@@ -819,8 +884,16 @@ function MemoryRow({
           type="button"
           className="memory-list-delete"
           onClick={onDelete}
-          aria-label={`删除 ${kind === 'event' ? '事件' : '印象'} ${item.id}`}
-          title={kind === 'event' ? '删除这条事件' : '删除这条印象'}
+          aria-label={
+            kind === 'event'
+              ? t('admin.events.delete_aria', { id: item.id })
+              : t('admin.thoughts.delete_aria', { id: item.id })
+          }
+          title={
+            kind === 'event'
+              ? t('admin.events.delete_title')
+              : t('admin.thoughts.delete_title')
+          }
         >
           ×
         </button>
@@ -856,10 +929,13 @@ function MemoryRow({
           disabled={trace.loading}
         >
           {trace.loading
-            ? '查找中⋯'
+            ? t('admin.memory_list.lineage_searching')
             : `${toggleLabel}${
                 trace.data
-                  ? ` ${expandedNodes.length} 条`
+                  ? ' ' +
+                    t('admin.memory_list.lineage_count', {
+                      count: expandedNodes.length,
+                    })
                   : ''
               } ${expanded ? '▾' : '▸'}`}
         </button>
@@ -875,8 +951,8 @@ function MemoryRow({
             expandedNodes.length === 0 && (
               <div style={traceEmpty}>
                 {kind === 'thought'
-                  ? '这条印象还没有被任何事件支撑 (可能反思链已被清空)'
-                  : '还没有印象从这条事件里沉淀出来'}
+                  ? t('admin.memory_list.no_sources')
+                  : t('admin.memory_list.no_derivatives')}
               </div>
             )}
           {expandedNodes.length > 0 && (
@@ -892,9 +968,11 @@ function MemoryRow({
                         n.id,
                       )
                     }
-                    title={`跳到${
-                      kind === 'thought' ? '事件' : '印象'
-                    } ${n.id}`}
+                    title={
+                      kind === 'thought'
+                        ? `${t('admin.memory_list.jump_to_event')} ${n.id}`
+                        : `${t('admin.memory_list.jump_to_thought')} ${n.id}`
+                    }
                   >
                     <div style={traceJumpMeta}>
                       <span>{formatTimestamp(n.created_at)}</span>
@@ -916,7 +994,9 @@ function MemoryRow({
           {trace.data?.kind === 'thought' &&
             trace.data.response.source_sessions.length > 0 && (
               <div style={traceSessionsRow}>
-                来自 {trace.data.response.source_sessions.length} 个 session
+                {t('admin.memory_list.from_sessions', {
+                  count: trace.data.response.source_sessions.length,
+                })}
               </div>
             )}
         </div>
@@ -1031,15 +1111,20 @@ function truncate(text: string, max: number): string {
  * shows the dependent thought descriptions inline; the hook signature
  * is the same.
  */
+type TFn = (key: string, opts?: Record<string, unknown>) => string
+
 function confirmDelete(
   description: string,
   preview: PreviewDeleteResponse,
+  t: TFn,
 ): Promise<'orphan' | 'cascade' | null> {
   const truncated =
     description.length > 80 ? `${description.slice(0, 80)}…` : description
 
   if (!preview.has_dependents) {
-    const ok = window.confirm(`删除这条记忆？\n\n${truncated}`)
+    const ok = window.confirm(
+      t('admin.memory_list.confirm_delete_simple', { preview: truncated }),
+    )
     return Promise.resolve(ok ? 'orphan' : null)
   }
 
@@ -1049,18 +1134,14 @@ function confirmDelete(
     .map((d, i) => `${i + 1}. ${d.length > 60 ? `${d.slice(0, 60)}…` : d}`)
     .join('\n')
 
-  const cascadeMsg =
-    `要删除这条记忆吗？\n\n${truncated}\n\n` +
-    `这条记忆产出了 ${depCount} 条派生印象：\n${depsList}\n\n` +
-    `确定 = 一起删（cascade）\n取消 = 只删这条，保留派生印象（orphan）\n` +
-    `想完全不动 → 关掉这个对话框时点 Esc`
+  const cascadeMsg = t('admin.memory_list.confirm_delete_cascade', {
+    preview: truncated,
+    depCount,
+    depsList,
+  })
   const cascade = window.confirm(cascadeMsg)
-  // The native dialog has only "确定 / 取消"; we treat
-  //   confirm=true  → cascade
-  //   confirm=false → orphan
-  // and rely on the user closing the dialog without choice (browser
-  // returns false too) to mean orphan. The Esc-as-cancel path is a
-  // UX wish that needs a real modal — flag for Stage X.
+  // confirm=true → cascade, confirm=false → orphan. Esc-as-cancel
+  // needs a real modal — flag for a later stage.
   return Promise.resolve(cascade ? 'cascade' : 'orphan')
 }
 
@@ -1088,6 +1169,7 @@ function VoiceTab({
   voiceEnabled: boolean
   toggleVoice: (enabled: boolean) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [toggling, setToggling] = useState(false)
   const navigate = useNavigate()
 
@@ -1104,21 +1186,22 @@ function VoiceTab({
     <div className="admin-section">
       <div className="admin-section-head">
         <div className="admin-section-title-row">
-          <h1 className="admin-section-title">声音</h1>
+          <h1 className="admin-section-title">
+            {t('admin.voice_tab.section_title')}
+          </h1>
           <span className="admin-section-engname">voice toggle</span>
         </div>
-        <p className="admin-section-lead">
-          控制 persona 是否用 TTS 语音朗读回复。
-        </p>
+        <p className="admin-section-lead">{t('admin.voice_tab.section_lead')}</p>
       </div>
 
       <div className="admin-hint-card" style={{ marginBottom: 16 }}>
         <div className="admin-hint-glyph">🎙</div>
         <div className="admin-hint-body">
-          <div className="admin-hint-title">想让 persona 用你的声音说话？</div>
+          <div className="admin-hint-title">
+            {t('admin.voice_tab.clone_prompt')}
+          </div>
           <div className="admin-hint-desc">
-            上传一段 10-60s 的纯净录音(多段更好)，训练一个属于你自己的
-            voice · 可以试听后再激活。没克隆的话就用 FishAudio 内置默认音。
+            {t('admin.voice_tab.clone_body')}
           </div>
         </div>
         <button
@@ -1126,7 +1209,7 @@ function VoiceTab({
           className="admin-hint-btn"
           onClick={() => navigate('/admin/voice/clone')}
         >
-          克隆新声音 →
+          {t('admin.voice_tab.clone_cta')}
         </button>
       </div>
 
@@ -1142,12 +1225,14 @@ function VoiceTab({
           />
           <div>
             <div className="voice-card-name">
-              语音回复 · {voiceEnabled ? '已开启' : '已关闭'}
+              {voiceEnabled
+                ? t('admin.voice_tab.toggle_label_on')
+                : t('admin.voice_tab.toggle_label_off')}
             </div>
             <div className="voice-card-meta">
               {voiceEnabled
-                ? '下一条 persona 回复会尝试用 TTS 语音朗读。'
-                : 'Persona 回复只以文字形式出现。'}
+                ? t('admin.voice_tab.toggle_help_on')
+                : t('admin.voice_tab.toggle_help_off')}
             </div>
           </div>
         </div>
@@ -1158,7 +1243,11 @@ function VoiceTab({
             onClick={() => void handleToggle()}
             disabled={toggling}
           >
-            {toggling ? '⋯' : voiceEnabled ? '关闭语音' : '开启语音'}
+            {toggling
+              ? '⋯'
+              : voiceEnabled
+                ? t('admin.voice_tab.toggle_disable')
+                : t('admin.voice_tab.toggle_enable')}
           </button>
         </div>
       </div>
@@ -1188,14 +1277,17 @@ function VoiceTab({
 // a successful PATCH so each card shows server-truth.
 
 function ConfigTab() {
+  const { t } = useTranslation()
   const { config, loading, saving, error, lastSaved, save } = useConfig()
 
   if (loading && config === null) {
     return (
       <div className="admin-section">
         <div className="admin-section-head">
-          <h1 className="admin-section-title">配置</h1>
-          <p className="admin-section-lead">加载中⋯</p>
+          <h1 className="admin-section-title">
+            {t('admin.config_tab.section_title')}
+          </h1>
+          <p className="admin-section-lead">{t('admin.config_tab.loading')}</p>
         </div>
       </div>
     )
@@ -1205,9 +1297,11 @@ function ConfigTab() {
     return (
       <div className="admin-section">
         <div className="admin-section-head">
-          <h1 className="admin-section-title">配置</h1>
+          <h1 className="admin-section-title">
+            {t('admin.config_tab.section_title')}
+          </h1>
           <p className="admin-section-lead" style={{ color: 'rgba(255,120,120,0.78)' }}>
-            ⚠ {error ?? '无法加载配置'}
+            ⚠ {error ?? t('admin.config_tab.load_error_fallback')}
           </p>
         </div>
       </div>
@@ -1218,13 +1312,15 @@ function ConfigTab() {
     <div className="admin-section">
       <div className="admin-section-head">
         <div className="admin-section-title-row">
-          <h1 className="admin-section-title">配置</h1>
+          <h1 className="admin-section-title">
+            {t('admin.config_tab.section_title')}
+          </h1>
           <span className="admin-section-engname">runtime config</span>
         </div>
-        <p className="admin-section-lead">
-          在这里改的设置会<strong>原子地写回 config.toml</strong>
-          并让 daemon 立即生效，不用重启。数据目录 / 数据库路径这类结构性字段不可在线改动。
-        </p>
+        <p
+          className="admin-section-lead"
+          dangerouslySetInnerHTML={{ __html: t('admin.config_tab.lead') }}
+        />
       </div>
 
       {error !== null && (
@@ -1237,7 +1333,9 @@ function ConfigTab() {
         >
           <div className="admin-hint-glyph">⚠</div>
           <div className="admin-hint-body">
-            <div className="admin-hint-title">保存失败</div>
+            <div className="admin-hint-title">
+              {t('admin.config_tab.save_failed_title')}
+            </div>
             <div className="admin-hint-desc">{error}</div>
           </div>
         </div>
@@ -1263,6 +1361,7 @@ interface ConfigCardProps {
 }
 
 function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
+  const { t } = useTranslation()
   const [provider, setProvider] = useState(config.llm.provider)
   const [model, setModel] = useState(config.llm.model ?? '')
   const [temperature, setTemperature] = useState(config.llm.temperature)
@@ -1306,12 +1405,17 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
     <section className="block-editor">
       <header className="block-editor-head">
         <div className="block-editor-label-row">
-          <h3 className="block-editor-label">LLM 提供商</h3>
+          <h3 className="block-editor-label">
+            {t('admin.config_tab.llm_section_title')}
+          </h3>
           <span className="block-editor-engname">llm.*</span>
         </div>
-        <p className="block-editor-hint">
-          控制 persona 的回复由谁生成。改完<strong>下一条消息</strong>就会用新模型。
-        </p>
+        <p
+          className="block-editor-hint"
+          dangerouslySetInnerHTML={{
+            __html: t('admin.config_tab.llm_lead'),
+          }}
+        />
       </header>
 
       <div style={{ display: 'grid', gap: 14 }}>
@@ -1341,7 +1445,9 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
 
         <FormRow
           label="temperature"
-          sub={`当前 ${temperature.toFixed(2)}   ·  范围 0.00 – 2.00`}
+          sub={t('admin.config_tab.llm_temperature_sub', {
+            value: temperature.toFixed(2),
+          })}
         >
           <input
             type="range"
@@ -1355,7 +1461,10 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
           />
         </FormRow>
 
-        <FormRow label="max_tokens" sub="单次回复上限,64 – 32000">
+        <FormRow
+          label="max_tokens"
+          sub={t('admin.config_tab.llm_max_tokens_sub')}
+        >
           <input
             type="number"
             min={64}
@@ -1368,7 +1477,10 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
           />
         </FormRow>
 
-        <FormRow label="timeout_seconds" sub="超时丢弃本次调用,1 – 600">
+        <FormRow
+          label="timeout_seconds"
+          sub={t('admin.config_tab.llm_timeout_sub')}
+        >
           <input
             type="number"
             min={1}
@@ -1380,7 +1492,10 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
           />
         </FormRow>
 
-        <FormRow label="api_key_env" sub="只读 · env var 名字 · 密钥本身在 .env / 系统环境">
+        <FormRow
+          label="api_key_env"
+          sub={t('admin.config_tab.llm_api_key_sub')}
+        >
           <div
             style={{
               display: 'flex',
@@ -1425,10 +1540,14 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
       <div className="block-editor-actions">
         <div className="block-editor-status">
           {recentlySaved && (
-            <span className="block-editor-saved">已保存 · 下次 LLM 调用生效 ✓</span>
+            <span className="block-editor-saved">
+              {t('admin.config_tab.llm_saved_note')}
+            </span>
           )}
           {!recentlySaved && dirty && (
-            <span className="block-editor-dirty">有未保存的修改</span>
+            <span className="block-editor-dirty">
+              {t('admin.common.unsaved_warning')}
+            </span>
           )}
         </div>
         <button
@@ -1437,7 +1556,7 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
           disabled={!dirty || saving}
           onClick={handleSave}
         >
-          {saving ? '⋯' : '保存'}
+          {saving ? '⋯' : t('admin.common.save')}
         </button>
       </div>
     </section>
@@ -1447,6 +1566,7 @@ function ConfigLlmCard({ config, saving, save, lastSaved }: ConfigCardProps) {
 // ─── Card 2 · Memory tuning ─────────────────────────────────────────
 
 function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) {
+  const { t } = useTranslation()
   const [retrieveK, setRetrieveK] = useState(config.memory.retrieve_k)
   const [bonus, setBonus] = useState(config.memory.relational_bonus_weight)
   const [recent, setRecent] = useState(config.memory.recent_window_size)
@@ -1479,16 +1599,23 @@ function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) 
     <section className="block-editor">
       <header className="block-editor-head">
         <div className="block-editor-label-row">
-          <h3 className="block-editor-label">记忆调优</h3>
+          <h3 className="block-editor-label">
+            {t('admin.config_tab.memory_section_title')}
+          </h3>
           <span className="block-editor-engname">memory.*</span>
         </div>
         <p className="block-editor-hint">
-          控制每次对话时 persona 调用多少条"发生过的事"和"长期印象"作为上下文。
+          {t('admin.config_tab.memory_lead')}
         </p>
       </header>
 
       <div style={{ display: 'grid', gap: 14 }}>
-        <FormRow label="retrieve_k" sub={`取回 ${retrieveK} 条记忆 · 1 – 30`}>
+        <FormRow
+          label="retrieve_k"
+          sub={t('admin.config_tab.memory_retrieve_k_sub', {
+            value: retrieveK,
+          })}
+        >
           <input
             type="range"
             min={1}
@@ -1503,7 +1630,9 @@ function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) 
 
         <FormRow
           label="relational_bonus_weight"
-          sub={`${bonus.toFixed(2)}   ·  "身边的人"相关记忆的加权系数 · 0.0 – 2.0`}
+          sub={t('admin.config_tab.memory_bonus_sub', {
+            value: bonus.toFixed(2),
+          })}
         >
           <input
             type="range"
@@ -1519,7 +1648,7 @@ function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) 
 
         <FormRow
           label="recent_window_size"
-          sub={`${recent} 条最近消息 · 1 – 200`}
+          sub={t('admin.config_tab.memory_recent_sub', { value: recent })}
         >
           <input
             type="number"
@@ -1536,10 +1665,14 @@ function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) 
       <div className="block-editor-actions">
         <div className="block-editor-status">
           {recentlySaved && (
-            <span className="block-editor-saved">已保存 ✓</span>
+            <span className="block-editor-saved">
+              {t('admin.common.saved')}
+            </span>
           )}
           {!recentlySaved && dirty && (
-            <span className="block-editor-dirty">有未保存的修改</span>
+            <span className="block-editor-dirty">
+              {t('admin.common.unsaved_warning')}
+            </span>
           )}
         </div>
         <button
@@ -1548,7 +1681,7 @@ function ConfigMemoryCard({ config, saving, save, lastSaved }: ConfigCardProps) 
           disabled={!dirty || saving}
           onClick={handleSave}
         >
-          {saving ? '⋯' : '保存'}
+          {saving ? '⋯' : t('admin.common.save')}
         </button>
       </div>
     </section>
@@ -1563,6 +1696,7 @@ function ConfigConsolidateCard({
   save,
   lastSaved,
 }: ConfigCardProps) {
+  const { t } = useTranslation()
   const [trivMsg, setTrivMsg] = useState(config.consolidate.trivial_message_count)
   const [trivTok, setTrivTok] = useState(config.consolidate.trivial_token_count)
   const [reflGate, setReflGate] = useState(
@@ -1597,18 +1731,20 @@ function ConfigConsolidateCard({
     <section className="block-editor">
       <header className="block-editor-head">
         <div className="block-editor-label-row">
-          <h3 className="block-editor-label">记忆整合阈值</h3>
+          <h3 className="block-editor-label">
+            {t('admin.config_tab.consolidate_section_title')}
+          </h3>
           <span className="block-editor-engname">consolidate.*</span>
         </div>
         <p className="block-editor-hint">
-          控制哪些对话被当作"琐碎"直接跳过,哪些才进事件提取 / 反思管线。
+          {t('admin.config_tab.consolidate_lead')}
         </p>
       </header>
 
       <div style={{ display: 'grid', gap: 14 }}>
         <FormRow
           label="trivial_message_count"
-          sub="消息条数低于此值的 session 直接跳过提取"
+          sub={t('admin.config_tab.consolidate_trivial_msgs_sub')}
         >
           <input
             type="number"
@@ -1623,7 +1759,7 @@ function ConfigConsolidateCard({
 
         <FormRow
           label="trivial_token_count"
-          sub="token 数低于此值的 session 直接跳过提取"
+          sub={t('admin.config_tab.consolidate_trivial_tokens_sub')}
         >
           <input
             type="number"
@@ -1639,7 +1775,7 @@ function ConfigConsolidateCard({
 
         <FormRow
           label="reflection_hard_gate_24h"
-          sub="24h 内最多做多少次反思 · 保护 LLM 预算"
+          sub={t('admin.config_tab.consolidate_reflection_limit_sub')}
         >
           <input
             type="number"
@@ -1656,10 +1792,14 @@ function ConfigConsolidateCard({
       <div className="block-editor-actions">
         <div className="block-editor-status">
           {recentlySaved && (
-            <span className="block-editor-saved">已保存 ✓</span>
+            <span className="block-editor-saved">
+              {t('admin.common.saved')}
+            </span>
           )}
           {!recentlySaved && dirty && (
-            <span className="block-editor-dirty">有未保存的修改</span>
+            <span className="block-editor-dirty">
+              {t('admin.common.unsaved_warning')}
+            </span>
           )}
         </div>
         <button
@@ -1668,7 +1808,7 @@ function ConfigConsolidateCard({
           disabled={!dirty || saving}
           onClick={handleSave}
         >
-          {saving ? '⋯' : '保存'}
+          {saving ? '⋯' : t('admin.common.save')}
         </button>
       </div>
     </section>
@@ -1678,6 +1818,7 @@ function ConfigConsolidateCard({
 // ─── Card 4 · System info (read-only) ──────────────────────────────
 
 function ConfigSystemCard({ config }: { config: ConfigGetResponse }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     try {
@@ -1693,13 +1834,17 @@ function ConfigSystemCard({ config }: { config: ConfigGetResponse }) {
     <section className="block-editor">
       <header className="block-editor-head">
         <div className="block-editor-label-row">
-          <h3 className="block-editor-label">系统信息</h3>
+          <h3 className="block-editor-label">
+            {t('admin.config_tab.system_section_title')}
+          </h3>
           <span className="block-editor-engname">read-only</span>
         </div>
-        <p className="block-editor-hint">
-          以下字段不可在线改 —— <strong>data_dir</strong> 和 <strong>db_path</strong> 决定数据库文件位置,
-          改动需要停 daemon,手动编辑 config.toml,再重启。
-        </p>
+        <p
+          className="block-editor-hint"
+          dangerouslySetInnerHTML={{
+            __html: t('admin.config_tab.system_lead'),
+          }}
+        />
       </header>
 
       <dl
@@ -1725,13 +1870,19 @@ function ConfigSystemCard({ config }: { config: ConfigGetResponse }) {
         </dd>
         <dt style={sysInfoDt}>config.toml</dt>
         <dd style={sysInfoDd}>
-          <code>{config.system.config_path ?? '(无文件)'}</code>
+          <code>
+            {config.system.config_path ?? t('admin.config_tab.system_no_file')}
+          </code>
         </dd>
       </dl>
 
       <div className="block-editor-actions">
         <div className="block-editor-status">
-          {copied && <span className="block-editor-saved">已复制路径 ✓</span>}
+          {copied && (
+            <span className="block-editor-saved">
+              {t('admin.config_tab.system_copied')}
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -1739,7 +1890,7 @@ function ConfigSystemCard({ config }: { config: ConfigGetResponse }) {
           onClick={() => void handleCopy()}
           disabled={config.system.config_path === null}
         >
-          复制 config.toml 路径
+          {t('admin.config_tab.system_copy_cta')}
         </button>
       </div>
     </section>
@@ -1830,6 +1981,7 @@ function formatBytes(n: number): string {
 // ═══════════════════════════════════════════════════════════
 
 function CostTab() {
+  const { t } = useTranslation()
   // Fetch the three windows in parallel so the three summary cards
   // are independent — if one fails the others still render.
   const today = useCostSummary('today')
@@ -1849,32 +2001,29 @@ function CostTab() {
     <div className="admin-section">
       <div className="admin-section-head">
         <div className="admin-section-title-row">
-          <h1 className="admin-section-title">成本</h1>
+          <h1 className="admin-section-title">{t('admin.cost.section_title')}</h1>
           <span className="admin-section-engname">cost · 30d window</span>
         </div>
-        <p className="admin-section-lead">
-          每次 LLM 调用都记一笔。下面是按时间窗口和功能拆分的估算花销 —
-          权威账单仍在 provider 控制台。
-        </p>
+        <p className="admin-section-lead">{t('admin.cost.lead')}</p>
       </div>
 
       {error && <div className="admin-error-banner">{error}</div>}
 
       <div className="cost-cards">
         <CostSummaryCard
-          label="今天"
+          label={t('admin.cost.today')}
           windowSub="today"
           summary={today.data}
           loading={today.loading}
         />
         <CostSummaryCard
-          label="近 7 天"
+          label={t('admin.cost.last_7d')}
           windowSub="7d"
           summary={week.data}
           loading={week.loading}
         />
         <CostSummaryCard
-          label="近 30 天"
+          label={t('admin.cost.last_30d')}
           windowSub="30d"
           summary={month.data}
           loading={month.loading}
@@ -1884,11 +2033,10 @@ function CostTab() {
       {noCalls ? (
         <div className="memory-list-empty">
           <div className="memory-list-empty-glyph">💸</div>
-          <div className="memory-list-empty-title">还没有 LLM 调用</div>
-          <p className="memory-list-empty-desc">
-            和 persona 聊几轮 / 跑一次导入,就会出现 chat / consolidate /
-            import 各项的花销分布。
-          </p>
+          <div className="memory-list-empty-title">
+            {t('admin.cost.empty_title')}
+          </div>
+          <p className="memory-list-empty-desc">{t('admin.cost.empty_body')}</p>
         </div>
       ) : (
         <>
@@ -2007,6 +2155,7 @@ function CostSummaryCard({
 }
 
 function CostByFeatureSection({ summary }: { summary: CostSummaryResponse }) {
+  const { t } = useTranslation()
   const buckets = Object.entries(summary.by_feature) as [
     string,
     CostFeatureBucket,
@@ -2017,14 +2166,16 @@ function CostByFeatureSection({ summary }: { summary: CostSummaryResponse }) {
 
   return (
     <div className="cost-by-feature">
-      <h2 className="cost-section-title">按功能拆分（30 天）</h2>
+      <h2 className="cost-section-title">
+        {t('admin.cost.feature_breakdown_title')}
+      </h2>
       <ul className="cost-bar-list">
         {buckets.map(([feature, b]) => {
           const pct = max === 0 ? 0 : Math.round((b.cost_usd / max) * 100)
           return (
             <li key={feature} className="cost-bar-row">
               <div className="cost-bar-head">
-                <span className="cost-bar-label">{labelForFeature(feature)}</span>
+                <span className="cost-bar-label">{labelForFeature(feature, t)}</span>
                 <span className="cost-bar-amount">
                   ${b.cost_usd.toFixed(4)} · {b.calls} call{b.calls === 1 ? '' : 's'}
                 </span>
@@ -2049,16 +2200,21 @@ function CostByFeatureSection({ summary }: { summary: CostSummaryResponse }) {
 }
 
 function CostRecentSection({ items }: { items: CostCallRecord[] }) {
+  const { t } = useTranslation()
   return (
     <div className="cost-recent">
-      <h2 className="cost-section-title">最近 LLM 调用</h2>
+      <h2 className="cost-section-title">
+        {t('admin.cost.recent_calls_title')}
+      </h2>
       <ul className="cost-recent-list">
         {items.map((it) => (
           <li key={it.id} className="cost-recent-row">
             <span className="cost-recent-time">
               {formatTimestamp(it.timestamp)}
             </span>
-            <span className="cost-recent-feature">{labelForFeature(it.feature)}</span>
+            <span className="cost-recent-feature">
+              {labelForFeature(it.feature, t)}
+            </span>
             <span className="cost-recent-model">
               {it.provider}/{it.model}
             </span>
@@ -2075,18 +2231,18 @@ function CostRecentSection({ items }: { items: CostCallRecord[] }) {
   )
 }
 
-function labelForFeature(feature: string): string {
+function labelForFeature(feature: string, t: TFn): string {
   switch (feature) {
     case 'chat':
-      return '对话'
+      return t('admin.cost.feature_chat')
     case 'import':
-      return '导入'
+      return t('admin.cost.feature_import')
     case 'consolidate':
-      return '整理'
+      return t('admin.cost.feature_consolidate')
     case 'reflection':
-      return '反思'
+      return t('admin.cost.feature_reflection')
     case 'proactive':
-      return '主动'
+      return t('admin.cost.feature_proactive')
     default:
       return feature
   }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { TopBar } from '../components/TopBar'
 import { useChat, isBoundaryEntry } from '../hooks/useChat'
 import type {
@@ -17,6 +18,7 @@ interface ChatProps {
 }
 
 export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
+  const { t } = useTranslation()
   const {
     messages,
     send,
@@ -28,7 +30,7 @@ export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
 
-  const moodSummary = moodBlock.trim().split(/[\n。]/)[0] || '平静、愿意倾听'
+  const moodSummary = moodBlock.trim().split(/[\n。]/)[0] || t('chat.mood_default')
 
   const handleSend = async () => {
     const text = draft.trim()
@@ -45,7 +47,7 @@ export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
   // Adapt each hook entry into either a prototype-shape chat message or
   // a BoundaryEntry (passed through unchanged) so we can render both
   // kinds from a single map below.
-  const timeline: RenderedEntry[] = messages.map(toRendered)
+  const timeline: RenderedEntry[] = messages.map((e) => toRendered(e, t))
 
   // "↑ 加载更早" button at top of timeline. Shown when the history
   // endpoint reported more older pages are available; also shown as a
@@ -58,7 +60,7 @@ export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
     <div className="chat-wrap">
       <TopBar
         mood={moodSummary}
-        primary={{ label: 'Admin', onClick: onOpenAdmin }}
+        primary={{ label: t('topbar.admin'), onClick: onOpenAdmin }}
       />
 
       <main className="chat-main">
@@ -89,10 +91,10 @@ export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
               }}
             >
               {historyLoading
-                ? '加载中⋯'
+                ? t('chat.loading')
                 : hasMoreHistory
-                  ? '↑ 加载更早的消息'
-                  : '已经是最早的消息'}
+                  ? t('chat.load_more')
+                  : t('chat.at_oldest')}
             </button>
           </div>
         )}
@@ -132,7 +134,7 @@ export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
             <input
               className="composer-input"
               type="text"
-              placeholder="想说点什么⋯"
+              placeholder={t('chat.placeholder')}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -146,7 +148,7 @@ export function Chat({ moodBlock, onOpenAdmin }: ChatProps) {
               onClick={() => void handleSend()}
               disabled={sending || draft.trim().length === 0}
             >
-              {sending ? '⋯' : '发送'}
+              {sending ? '⋯' : t('chat.send')}
             </button>
           </div>
         </div>
@@ -174,20 +176,20 @@ type RenderedEntry =
   | { kind: 'message'; data: PrototypeMessage }
   | { kind: 'boundary'; data: BoundaryEntry }
 
-function toRendered(entry: TimelineEntry): RenderedEntry {
+function toRendered(entry: TimelineEntry, t: TFn): RenderedEntry {
   if (isBoundaryEntry(entry)) {
     return { kind: 'boundary', data: entry }
   }
-  return { kind: 'message', data: toPrototypeShape(entry) }
+  return { kind: 'message', data: toPrototypeShape(entry, t) }
 }
 
-function toPrototypeShape(m: HookMessage): PrototypeMessage {
+function toPrototypeShape(m: HookMessage, t: TFn): PrototypeMessage {
   // Worker Y · cross-channel badge. History backfill carries a
   // `source_channel_id`; live SSE messages typed from this tab don't,
   // and we treat `undefined` as the current (Web) channel — no badge
   // for those so the timeline stays quiet for the common case.
   const baseLabel = formatTimestamp(m.timestamp)
-  const badge = channelBadge(m.source_channel_id)
+  const badge = channelBadge(m.source_channel_id, t)
   const timestampLabel = badge ? `${baseLabel} · ${badge}` : baseLabel
 
   return {
@@ -207,9 +209,10 @@ function toPrototypeShape(m: HookMessage): PrototypeMessage {
     // Voice: if the hook message carries a voice_url (from
     // chat.message.voice_ready SSE), surface it through the prototype's
     // VoiceMeta shape so the VoiceButton component renders a real
-    // <audio> player.
+    // <audio> player. toneLabel is populated from i18n at render time
+    // by VoiceButton itself (not here) to keep this adapter pure.
     voice: m.voice_url
-      ? { duration: '', toneLabel: '她的声音', url: m.voice_url }
+      ? { duration: '', toneLabel: '', url: m.voice_url }
       : undefined,
   }
 }
@@ -240,10 +243,10 @@ function formatTimestamp(iso: string): string {
  *  from this tab. Undefined + "web" → no badge (the tab is Web; self-
  *  label would be noise). Returns "" for the empty case so the caller
  *  can conditionally join against the timestamp. */
-function channelBadge(sourceChannelId: string | undefined): string {
+function channelBadge(sourceChannelId: string | undefined, t: TFn): string {
   if (!sourceChannelId || sourceChannelId === 'web') return ''
-  if (sourceChannelId.startsWith('discord')) return '📱 Discord'
-  if (sourceChannelId.startsWith('imessage')) return '💬 iMessage'
+  if (sourceChannelId.startsWith('discord')) return t('chat.source_discord')
+  if (sourceChannelId.startsWith('imessage')) return t('chat.source_imessage')
   if (sourceChannelId.startsWith('wechat')) return '💭 WeChat'
   return `· ${sourceChannelId}`
 }
@@ -268,7 +271,9 @@ function isFirstOfTurn(
 // should feel like a page break, not an event.
 
 function SessionBoundary({ entry }: { entry: BoundaryEntry }) {
-  const relative = formatRelativeTime(entry.timestamp)
+  const { t } = useTranslation()
+  const relative = formatRelativeTime(entry.timestamp, t)
+
   return (
     <div
       className="session-boundary"
@@ -305,18 +310,20 @@ function SessionBoundary({ entry }: { entry: BoundaryEntry }) {
   )
 }
 
-function formatRelativeTime(iso: string): string {
+type TFn = (key: string, opts?: Record<string, unknown>) => string
+
+function formatRelativeTime(iso: string, t: TFn): string {
   try {
     const ts = new Date(iso).getTime()
     if (Number.isNaN(ts)) return '——'
     const diffMs = Date.now() - ts
-    if (diffMs < 60_000) return '刚刚'
+    if (diffMs < 60_000) return t('time.just_now')
     const minutes = Math.floor(diffMs / 60_000)
-    if (minutes < 60) return `${minutes} 分钟前`
+    if (minutes < 60) return t('time.minutes_ago', { count: minutes })
     const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours} 小时前`
+    if (hours < 24) return t('time.hours_ago', { count: hours })
     const days = Math.floor(hours / 24)
-    if (days < 7) return `${days} 天前`
+    if (days < 7) return t('time.days_ago', { count: days })
     // Fall back to an absolute MM-DD for older boundaries.
     const d = new Date(iso)
     const mm = (d.getMonth() + 1).toString().padStart(2, '0')
@@ -330,6 +337,7 @@ function formatRelativeTime(iso: string): string {
 // ─── Empty-state + render components (unchanged logic, trimmed) ─────────
 
 function EmptyState() {
+  const { t } = useTranslation()
   return (
     <div
       style={{
@@ -341,9 +349,7 @@ function EmptyState() {
         lineHeight: 1.8,
       }}
     >
-      还没有消息。
-      <br />
-      随便说点什么开始吧。
+      {t('chat.empty')}
     </div>
   )
 }
@@ -416,6 +422,7 @@ function Letter({ content, voice, streaming }: LetterProps) {
 }
 
 function VoiceButton({ meta }: { meta: VoiceMeta }) {
+  const { t } = useTranslation()
   const [playing, setPlaying] = useState(false)
   const [audioEl] = useState(() => {
     if (typeof Audio === 'undefined') return null
@@ -449,8 +456,8 @@ function VoiceButton({ meta }: { meta: VoiceMeta }) {
         </svg>
       </div>
       <div className="voice-label">
-        {playing ? '播放中 ' : '语音 '}
-        <em>{playing ? '⋯' : meta.toneLabel}</em>
+        {playing ? t('chat.voice_playing') : t('chat.voice_label')}{' '}
+        <em>{playing ? '⋯' : ''}</em>
       </div>
     </button>
   )

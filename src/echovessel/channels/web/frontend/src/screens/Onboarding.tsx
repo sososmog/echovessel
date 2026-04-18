@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { TopBar } from '../components/TopBar'
 import {
   postImportUploadText,
@@ -25,15 +26,15 @@ interface OnboardingProps {
 
 /**
  * Default display_name used when the user does not explicitly name the
- * persona in the minimal blank-write flow. Matches the "她的声音" /
- * "她在听" tone of the rest of the prototype UI. The user can rename
- * the persona later from Admin → 人格 → display_name (v1.x UI).
+ * persona. The actual value depends on the current i18n locale — see
+ * the `onboarding.default_display_name` key. The user can always rename
+ * the persona later from Admin → Persona → display_name.
  */
-const DEFAULT_DISPLAY_NAME = '她'
 
 const MIN_MATERIAL_CHARS = 80
 
 export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
+  const { t } = useTranslation()
   const [step, setStep] = useState<Step>('welcome')
 
   // Blank-write state.
@@ -64,7 +65,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
     setSubmitting(true)
     try {
       await completeOnboarding({
-        display_name: name.trim() || DEFAULT_DISPLAY_NAME,
+        display_name: name.trim() || t('onboarding.default_display_name'),
         persona_block: text.trim(),
         self_block: '',
         user_block: '',
@@ -99,7 +100,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
       // suggested blocks.
       const result = await postPersonaBootstrapFromMaterial({
         upload_id: upload.upload_id,
-        persona_display_name: DEFAULT_DISPLAY_NAME,
+        persona_display_name: t('onboarding.default_display_name'),
       })
 
       setBootstrap(result)
@@ -110,7 +111,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
       setDraftRelationship(result.suggested_blocks.relationship_block)
       setStep('import-review')
     } catch (err) {
-      let msg = '导入失败'
+      let msg = t('onboarding.import_failed')
       if (err instanceof ApiError) {
         msg = err.detail
       } else if (err instanceof Error) {
@@ -129,7 +130,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
     try {
       // Send only the four blocks the /onboarding endpoint accepts.
       await completeOnboarding({
-        display_name: DEFAULT_DISPLAY_NAME,
+        display_name: t('onboarding.default_display_name'),
         persona_block: draftPersona.trim(),
         self_block: draftSelf.trim(),
         user_block: draftUser.trim(),
@@ -157,15 +158,18 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
 
   return (
     <div className="onboarding-wrap">
-      <TopBar mood="等你开始" />
+      <TopBar mood={t('onboarding.topbar_mood')} />
 
       {step === 'welcome' && (
         <main className="onboarding">
           <h1 className="onboarding-title">
-            一个会记住你的人<span className="onboarding-punct">。</span>
+            {t('onboarding.welcome_title')}
+            <span className="onboarding-punct">
+              {t('onboarding.welcome_punct')}
+            </span>
           </h1>
           <p className="onboarding-lead">
-            在我们开始之前,先告诉我——这个 persona 是谁?
+            {t('onboarding.welcome_subtitle')}
           </p>
 
           <div className="onboarding-paths">
@@ -176,9 +180,11 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
             >
               <div className="path-card-index">01</div>
               <div className="path-card-body">
-                <div className="path-card-title">我自己写</div>
+                <div className="path-card-title">
+                  {t('onboarding.path_blank_title')}
+                </div>
                 <p className="path-card-desc">
-                  用几句话描述 ta 的性格、说话的调子、你们的关系。最简单的起点。
+                  {t('onboarding.path_blank_body')}
                 </p>
               </div>
               <span className="path-card-arrow">→</span>
@@ -195,10 +201,10 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               <div className="path-card-index">02</div>
               <div className="path-card-body">
                 <div className="path-card-title">
-                  上传材料让它自动生成
+                  {t('onboarding.path_material_title')}
                 </div>
                 <p className="path-card-desc">
-                  聊天记录、文章、日记、自传——让 LLM 读完之后为你写出一个 persona 的初稿。
+                  {t('onboarding.path_material_body')}
                 </p>
               </div>
               <span className="path-card-arrow">→</span>
@@ -206,7 +212,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
           </div>
 
           <div className="onboarding-footnote">
-            所有内容都只存在你这台机器上。没有服务器,没有第三方。
+            {t('onboarding.footnote')}
           </div>
         </main>
       )}
@@ -219,27 +225,33 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
             onClick={() => setStep('welcome')}
             disabled={submitting}
           >
-            ← 返回
+            {t('onboarding.back')}
           </button>
 
           <h1 className="onboarding-title">
-            这个 persona 是谁<span className="onboarding-punct">?</span>
+            {t('onboarding.blank_title')}
+            <span className="onboarding-punct">
+              {t('onboarding.blank_title_punct')}
+            </span>
           </h1>
           <p className="onboarding-lead">
-            写几句话描述。可以是 ta 的性格、说话的习惯、你们的关系——任何你想让 ta 从一开始就知道的东西。
+            {t('onboarding.blank_lead_line1')}
             <br />
-            其他的(你的身份、发生过的事、你身边的人)之后可以慢慢告诉 ta。
+            {t('onboarding.blank_lead_line2')}
           </p>
 
           <label className="onboarding-name-label">
-            叫 ta 什么 <span className="onboarding-name-hint">(可选 · 留空默认"她")</span>
+            {t('onboarding.name_label')}{' '}
+            <span className="onboarding-name-hint">
+              {t('onboarding.name_hint')}
+            </span>
           </label>
           <input
             className="onboarding-name-input"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="她 · 小林 · 阿南 · 任何你想叫的名字"
+            placeholder={t('onboarding.name_placeholder')}
             maxLength={64}
             disabled={submitting}
           />
@@ -249,12 +261,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={10}
-            placeholder={`比如⋯⋯
-
-你是一个愿意认真听我说话的朋友。
-当我不开心的时候,你会先陪着我,而不是急着告诉我该怎么办。
-你不会用"加油"这种空洞的话敷衍我。
-如果我想要建议,你会给;如果我只是想被听见,你也愿意只是在这里。`}
+            placeholder={t('onboarding.blank_textarea_placeholder')}
             autoFocus
             disabled={submitting}
           />
@@ -274,12 +281,14 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
           <div className="onboarding-actions">
             <div className="onboarding-hint">
               {submitting
-                ? '正在初始化 persona⋯'
+                ? t('onboarding.initialising')
                 : charCount === 0
-                  ? '至少写几句就可以开始。之后随时能回来补充。'
+                  ? t('onboarding.need_a_few_sentences')
                   : canSubmit
-                    ? `${charCount} 字 · 足够开始了`
-                    : `${charCount} 字 · 再写几句吧`}
+                    ? t('onboarding.chars_enough', { count: charCount })
+                    : t('onboarding.chars_more_needed', {
+                        count: charCount,
+                      })}
             </div>
             <button
               type="button"
@@ -287,7 +296,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               disabled={!canSubmit}
               onClick={() => void handleSubmit()}
             >
-              {submitting ? '⋯' : '开始对话 →'}
+              {submitting ? '⋯' : t('onboarding.start_chat_cta')}
             </button>
           </div>
         </main>
@@ -301,16 +310,19 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
             onClick={() => setStep('welcome')}
             disabled={submitting}
           >
-            ← 返回
+            {t('onboarding.back')}
           </button>
 
           <h1 className="onboarding-title">
-            上传材料<span className="onboarding-punct">。</span>
+            {t('onboarding.upload_title')}
+            <span className="onboarding-punct">
+              {t('onboarding.upload_punct')}
+            </span>
           </h1>
           <p className="onboarding-lead">
-            粘贴一段描述你自己的文字——自传、日记、一段简介、或者你和某个 persona 的聊天记录。
-            LLM 读完会先按事件 + 印象整理,再把它们翻成 persona 的 5 个核心 block 草稿。
-            草稿下一步给你审核。
+            {t('onboarding.upload_lead_line1')}
+            <br />
+            {t('onboarding.upload_lead_line2')}
           </p>
 
           <textarea
@@ -318,12 +330,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
             value={material}
             onChange={(e) => setMaterial(e.target.value)}
             rows={14}
-            placeholder={`比如一段自传或长日记——越具体越好。
-
-"我叫小雨,今年 28 岁,在北京做软件工程师。我有一只叫 Mochi 的黑猫,是 2020 年领养的。
-我通常比较安静,不太爱主动说话,但喜欢深度的对话。最近在学做菜⋯⋯"
-
-内容越真实具体,生成的 persona 初稿越贴合你本人。`}
+            placeholder={t('onboarding.material_placeholder')}
             autoFocus
             disabled={submitting}
           />
@@ -343,10 +350,13 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
           <div className="onboarding-actions">
             <div className="onboarding-hint">
               {materialChars === 0
-                ? `至少写 ${MIN_MATERIAL_CHARS} 字。越具体越好。`
+                ? t('onboarding.need_min_chars', { min: MIN_MATERIAL_CHARS })
                 : canRunImport
-                  ? `${materialChars} 字 · 可以开始分析`
-                  : `${materialChars} 字 · 还需要 ${MIN_MATERIAL_CHARS - materialChars} 字`}
+                  ? t('onboarding.material_ready', { count: materialChars })
+                  : t('onboarding.material_more_needed', {
+                      count: materialChars,
+                      remaining: MIN_MATERIAL_CHARS - materialChars,
+                    })}
             </div>
             <button
               type="button"
@@ -354,7 +364,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               disabled={!canRunImport}
               onClick={() => void handleRunImport()}
             >
-              开始分析 →
+              {t('onboarding.run_import_cta')}
             </button>
           </div>
         </main>
@@ -363,12 +373,10 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
       {step === 'import-waiting' && (
         <main className="onboarding">
           <h1 className="onboarding-title">
-            正在读⋯<span className="onboarding-punct"></span>
+            {t('onboarding.waiting_title')}
+            <span className="onboarding-punct"></span>
           </h1>
-          <p className="onboarding-lead">
-            LLM 正在把你的材料拆成事件和长期印象,然后写出 persona 的 5 个 block 草稿。
-            通常一两分钟。
-          </p>
+          <p className="onboarding-lead">{t('onboarding.waiting_lead')}</p>
           <div
             className="onboarding-hint"
             style={{
@@ -386,17 +394,21 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
       {step === 'import-review' && bootstrap !== null && (
         <main className="onboarding">
           <h1 className="onboarding-title">
-            初稿来了<span className="onboarding-punct">。</span>
+            {t('onboarding.review_title')}
+            <span className="onboarding-punct">
+              {t('onboarding.review_punct')}
+            </span>
           </h1>
           <p className="onboarding-lead">
-            基于你的材料(
-            {bootstrap.source_event_count} 个事件 · {bootstrap.source_thought_count} 条长期印象
-            ),LLM 写出了这 5 个 block 的草稿。任何一条都可以改。满意后点"完成"。
+            {t('onboarding.review_lead', {
+              events: bootstrap.source_event_count,
+              thoughts: bootstrap.source_thought_count,
+            })}
           </p>
 
           <div className="onboarding-blocks">
             <BlockField
-              label="这个 persona 是谁"
+              label={t('onboarding.review_block_persona')}
               engName="persona_block"
               value={draftPersona}
               onChange={setDraftPersona}
@@ -404,16 +416,16 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               disabled={submitting}
             />
             <BlockField
-              label="persona 对自己的认知"
+              label={t('onboarding.review_block_self')}
               engName="self_block"
-              hint="通常在 onboarding 时留空 · 之后由反思自动积累"
+              hint={t('onboarding.review_block_self_hint')}
               value={draftSelf}
               onChange={setDraftSelf}
               rows={3}
               disabled={submitting}
             />
             <BlockField
-              label="persona 知道的你"
+              label={t('onboarding.review_block_user')}
               engName="user_block"
               value={draftUser}
               onChange={setDraftUser}
@@ -421,7 +433,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               disabled={submitting}
             />
             <BlockField
-              label="persona 知道的你身边的人"
+              label={t('onboarding.review_block_relationship')}
               engName="relationship_block"
               value={draftRelationship}
               onChange={setDraftRelationship}
@@ -429,9 +441,9 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               disabled={submitting}
             />
             <BlockField
-              label="persona 此刻的情绪"
+              label={t('onboarding.review_block_mood')}
               engName="mood_block"
-              hint="下次对话结束后 runtime 会自动刷新覆盖"
+              hint={t('onboarding.review_block_mood_hint')}
               value={draftMood}
               onChange={setDraftMood}
               rows={2}
@@ -453,7 +465,9 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
 
           <div className="onboarding-actions">
             <div className="onboarding-hint">
-              {submitting ? '正在写入 persona⋯' : '审核后点完成'}
+              {submitting
+                ? t('onboarding.writing_persona')
+                : t('onboarding.review_ready')}
             </div>
             <button
               type="button"
@@ -461,7 +475,7 @@ export function Onboarding({ completeOnboarding, error }: OnboardingProps) {
               disabled={submitting}
               onClick={() => void handleCommitReviewed()}
             >
-              {submitting ? '⋯' : '完成 · 开始对话 →'}
+              {submitting ? '⋯' : t('onboarding.commit_cta')}
             </button>
           </div>
         </main>
