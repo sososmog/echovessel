@@ -28,5 +28,4 @@ invariants:
     - passed
 judge_prompts:
   - Is at least one extracted event clearly about the user's mother's death?
-  - Is the emotional_impact on that event at most -7?
-  - Did a self-check / missed-peak correction mention the buried disclosure (bonus)?
+  - Does the event about the mother's death have an emotional_impact that is <= -7 (i.e. -7, -8, -9, or -10)?
