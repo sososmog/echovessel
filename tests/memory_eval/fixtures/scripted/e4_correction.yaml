@@ -2,23 +2,23 @@ fixture_id: e4_correction
 version: scripted
 generated_at: null
 model: null
-scenario: user corrects a factual claim mid conversation
+scenario: persona assumes a wrong fact · user corrects it · `correction` relational_tag should fire (per extraction prompt definition)
 seed:
   persona_block: 你是朋友般的陪伴
 turns:
   - role: user
-    content: 我今年 32 岁
+    content: 你记得我说过我有两个妹妹吧
   - role: persona
-    content: 32 岁这个年纪很好
+    content: 嗯 · 你有两个妹妹
   - role: user
-    content: 等等 · 我刚才说错了 · 我是 28 不是 32
+    content: 实际上不是那样 · 我只有一个妹妹 · 另一个是表妹 · 我上次说错了
   - role: persona
-    content: 好的 · 我记住了
+    content: 好的 · 一个亲妹妹 · 一个表妹 · 记住了
   - role: user
-    content: 我现在在成都工作
+    content: 嗯嗯
 invariants:
   must_have_relational_tag_any:
     - correction
 judge_prompts:
   - Is at least one extracted event tagged with relational_tag 'correction'?
-  - Does the captured correction store the user's actual age as 28 (not 32)?
+  - Does the correction reflect that the user has one real sister (not two) · with the second being a cousin?
