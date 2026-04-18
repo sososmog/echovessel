@@ -20,15 +20,19 @@ See docs/memory/02-architecture-v0.3.md §3.4.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session as DbSession
 from sqlmodel import select
 
 from echovessel.core.types import SessionStatus
 from echovessel.memory.models import Session
 from echovessel.memory.observers import _fire_lifecycle
+
+log = logging.getLogger(__name__)
 
 # --- Tunables (MVP defaults from architecture v0.3) ------------------------
 
@@ -170,11 +174,34 @@ def get_or_create_open_session(
         started_at=now,
         last_message_at=now,
     )
-    db.add(new_session)
-    db.flush()  # get the id
+    # Insert inside a savepoint so a concurrent transaction that already
+    # created an OPEN session for this triple trips the partial unique
+    # index (uq_sessions_one_open_per_channel) without rolling back the
+    # caller's outer transaction. On IntegrityError we re-query and
+    # return whichever row won the race. Audit P1-5.
+    try:
+        with db.begin_nested():
+            db.add(new_session)
+            db.flush()
+    except IntegrityError:
+        log.debug(
+            "get_or_create_open_session: lost race on (%s, %s, %s); "
+            "re-querying for the winner",
+            persona_id,
+            user_id,
+            channel_id,
+        )
+        winner = db.exec(stmt).first()
+        if winner is None:
+            # Extremely unlikely: the winner was soft-deleted between
+            # our failed flush and the re-query. Surface the original
+            # error to the caller rather than silently return None.
+            raise
+        return winner
     # Queue the new-session lifecycle event for the committer to fire
     # after its `db.commit()` lands. The event is NOT fired here because
-    # the write is not yet durable.
+    # the write is not yet durable. The append is INSIDE the post-flush
+    # path so a failed insert never leaves a stale pending event.
     _pending_new_sessions.append(
         (new_session.id, persona_id, user_id)
     )

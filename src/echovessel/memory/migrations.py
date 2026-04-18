@@ -158,6 +158,40 @@ def ensure_schema_up_to_date(engine: Engine) -> None:
                 spec.sql_type,
             )
 
+        # Audit P1-5: partial unique index preventing two OPEN sessions
+        # for the same (persona, user, channel) triple. On fresh DBs
+        # create_all_tables also creates this via the SQLModel
+        # declaration; the IF NOT EXISTS guard makes the two paths
+        # converge. Legacy DBs may already have a duplicate pair — in
+        # that case the CREATE fails. Log a warning and continue rather
+        # than crash: `get_or_create_open_session`'s savepoint path still
+        # handles the absence of the constraint gracefully, and a DB
+        # with a pre-existing conflict is safer to leave visible than
+        # to refuse startup over.
+        if _table_exists(conn, "sessions") and not _index_exists(
+            conn, "uq_sessions_one_open_per_channel"
+        ):
+            try:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_sessions_one_open_per_channel "
+                        "ON sessions (persona_id, user_id, channel_id) "
+                        "WHERE status = 'open' AND deleted_at IS NULL"
+                    )
+                )
+                log.info(
+                    "schema migration: added unique index "
+                    "uq_sessions_one_open_per_channel"
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "schema migration: could not create "
+                    "uq_sessions_one_open_per_channel "
+                    "(likely a pre-existing duplicate OPEN pair): %s",
+                    e,
+                )
+
 
 # ---------------------------------------------------------------------------
 # Inspection helpers
@@ -184,6 +218,18 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
     # PRAGMA table_info columns: (cid, name, type, notnull, dflt_value, pk)
     return any(row[1] == column_name for row in rows)
+
+
+def _index_exists(conn, index_name: str) -> bool:
+    """Check `sqlite_master` for an index by name."""
+    row = conn.execute(
+        text(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name=:name"
+        ),
+        {"name": index_name},
+    ).first()
+    return row is not None
 
 
 __all__ = ["ensure_schema_up_to_date"]

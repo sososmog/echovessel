@@ -32,6 +32,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlmodel import Field, SQLModel
 
@@ -164,6 +165,19 @@ class Session(SQLModel, table=True):
             "user_id",
             "channel_id",
             "started_at",
+        ),
+        # Audit P1-5: at most one OPEN session per (persona, user, channel).
+        # Without this, two concurrent ingests for the same triple can
+        # both see no open session and both insert, leaving the DB with
+        # duplicate OPEN rows. Partial (WHERE status='open') so closed
+        # history rows can pile up freely.
+        Index(
+            "uq_sessions_one_open_per_channel",
+            "persona_id",
+            "user_id",
+            "channel_id",
+            unique=True,
+            sqlite_where=text("status = 'open' AND deleted_at IS NULL"),
         ),
     )
 

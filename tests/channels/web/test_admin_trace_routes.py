@@ -20,7 +20,7 @@ from sqlmodel import Session as DbSession
 from echovessel.channels.web.app import build_web_app
 from echovessel.channels.web.channel import WebChannel
 from echovessel.channels.web.sse import SSEBroadcaster
-from echovessel.core.types import MessageRole, NodeType
+from echovessel.core.types import MessageRole, NodeType, SessionStatus
 from echovessel.memory import (
     ConceptNode,
     ConceptNodeFilling,
@@ -94,17 +94,24 @@ def _seed_lineage(rt: Runtime) -> dict:
             db.add(User(id="self", display_name="Alan"))
         db.commit()
 
+        # Both sessions are CLOSED (consolidated) — the thoughts / events
+        # under test represent reflections over historical sessions, not
+        # two simultaneously-active conversations. Partial unique index
+        # `uq_sessions_one_open_per_channel` forbids two OPEN for the
+        # same triple (audit P1-5).
         sess_a = RecallSession(
             id="sess_a",
             persona_id="p_trace",
             user_id="self",
             channel_id="test",
+            status=SessionStatus.CLOSED,
         )
         sess_b = RecallSession(
             id="sess_b",
             persona_id="p_trace",
             user_id="self",
             channel_id="test",
+            status=SessionStatus.CLOSED,
         )
         db.add(sess_a)
         db.add(sess_b)
