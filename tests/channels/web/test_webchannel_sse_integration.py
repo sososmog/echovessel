@@ -5,8 +5,12 @@ broadcaster for:
 
 - ``push_user_message`` → ``chat.message.user_appended``
 - ``send(OutgoingMessage)`` → ``chat.message.done``
-- ``on_token_callback()`` returned callable → ``chat.message.token``
 - ``push_sse(...)`` direct → whatever event was passed
+
+The historical per-token streaming path (``on_token_callback`` →
+``chat.message.token``) was removed when the UX switched to a typing
+indicator; see tests/runtime/test_cross_channel_sse.py for the
+``chat.message.typing_started`` regression.
 """
 
 from __future__ import annotations
@@ -88,18 +92,3 @@ async def test_push_user_message_broadcasts_user_appended() -> None:
     assert frame["data"]["external_ref"] == "client-tag"
 
 
-async def test_on_token_callback_streams_token_events_in_order() -> None:
-    channel, broadcaster = _make()
-    q = await broadcaster.register()
-
-    cb = channel.on_token_callback()
-    for delta in ("he", "llo", " world"):
-        await cb(42, delta)
-
-    received = []
-    while not q.empty():
-        received.append(q.get_nowait())
-
-    assert [f["event"] for f in received] == ["chat.message.token"] * 3
-    assert [f["data"]["delta"] for f in received] == ["he", "llo", " world"]
-    assert all(f["data"]["message_id"] == 42 for f in received)

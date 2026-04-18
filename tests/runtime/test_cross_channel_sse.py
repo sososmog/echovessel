@@ -200,6 +200,67 @@ async def test_discord_turn_mirrors_user_appended_and_done_to_web_broadcaster() 
 
 
 @pytest.mark.asyncio
+async def test_turn_publishes_typing_started_and_not_token_frames() -> None:
+    """Chat UX moved from token-by-token streaming to a typing indicator.
+
+    The runtime must:
+      - emit exactly one ``chat.message.typing_started`` frame before
+        the LLM stream starts, so the browser can show a '正在输入...'
+        bubble immediately
+      - NOT emit any ``chat.message.token`` frames (the prior per-token
+        streaming path is removed)
+      - still emit ``chat.message.done`` with the full content at the
+        end, unchanged
+
+    Regression test for the typing-indicator UX replan.
+    """
+
+    rt = _build_runtime()
+    await rt.start(register_signals=False)
+    try:
+        broadcaster = rt.broadcaster
+        assert broadcaster is not None
+        queue = await broadcaster.register()
+
+        web = rt.ctx.registry.get("web")
+        assert web is not None
+        msg = IncomingMessage(
+            channel_id="web",
+            user_id="self",
+            content="hello from web",
+            received_at=datetime.now(),
+            external_ref="ext-web",
+        )
+        turn = IncomingTurn.from_single_message(msg)
+        await rt._handle_turn(turn)
+        frames = await _drain_queue(queue)
+    finally:
+        await rt.stop()
+
+    event_names = [f["event"] for f in frames]
+    typing_frames = [f for f in frames if f["event"] == "chat.message.typing_started"]
+    token_frames = [f for f in frames if f["event"] == "chat.message.token"]
+    done_frames = [f for f in frames if f["event"] == "chat.message.done"]
+
+    assert len(typing_frames) == 1, (
+        f"expected exactly one chat.message.typing_started frame, "
+        f"got {len(typing_frames)}. Full sequence: {event_names}"
+    )
+    assert token_frames == [], (
+        f"chat.message.token frames must no longer be emitted; "
+        f"saw {len(token_frames)}. Full sequence: {event_names}"
+    )
+    assert len(done_frames) == 1, (
+        f"expected exactly one chat.message.done frame, "
+        f"got {len(done_frames)}. Full sequence: {event_names}"
+    )
+
+    # typing_started and done must share the same message_id so the
+    # client can correlate the placeholder with the final content.
+    assert typing_frames[0]["data"]["message_id"] == done_frames[0]["data"]["message_id"]
+
+
+@pytest.mark.asyncio
 async def test_web_turn_does_not_double_publish_via_runtime() -> None:
     """Web-sourced turns: WebChannel's own broadcast handles it.
     Runtime must NOT republish the same events.

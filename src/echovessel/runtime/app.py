@@ -1190,40 +1190,6 @@ class Runtime:
                 "cross-channel broadcast failed (event=%s): %s", event, e
             )
 
-    def _wrap_on_token_for_cross_channel_mirror(
-        self,
-        *,
-        original: Callable | None,
-        source_channel_id: str,
-    ) -> Callable:
-        """Wrap an ``on_token`` callback so the runtime broadcaster sees
-        every streaming token with ``source_channel_id`` attached.
-
-        The original callback (if any) is still called first so
-        channel-native on_token pipelines (e.g. Web's own broadcast for
-        Web-sourced turns — irrelevant here because we only wrap for
-        non-Web turns) continue to work.
-        """
-
-        async def _mirrored(message_id: int, delta: str) -> None:
-            if original is not None:
-                try:
-                    await original(message_id, delta)
-                except Exception as e:  # noqa: BLE001
-                    log.warning(
-                        "original on_token raised: %s", e
-                    )
-            self._publish_cross_channel_event(
-                "chat.message.token",
-                {
-                    "message_id": message_id,
-                    "delta": delta,
-                    "source_channel_id": source_channel_id,
-                },
-            )
-
-        return _mirrored
-
     def _publish_cross_channel_done(
         self, outgoing: OutgoingMessage, turn: IncomingTurn
     ) -> None:
@@ -1273,24 +1239,8 @@ class Runtime:
         llm = self.ctx.llm
 
         channel = self.ctx.registry.get(turn.channel_id)
-        on_token = None
         channel_on_turn_done = None
         if channel is not None:
-            # Stage 2 · Web channel exposes an `on_token_callback()`
-            # factory that returns a fresh async callable for this
-            # turn. Non-Web channels just leave on_token=None.
-            token_factory = getattr(channel, "on_token_callback", None)
-            if callable(token_factory):
-                try:
-                    on_token = token_factory()
-                except Exception as e:  # noqa: BLE001
-                    log.warning(
-                        "channel %s on_token_callback raised, disabling "
-                        "streaming for this turn: %s",
-                        turn.channel_id,
-                        e,
-                    )
-                    on_token = None
             channel_on_turn_done = getattr(channel, "on_turn_done", None)
             # Best-effort in_flight tracking for proactive's gate.
             # Channels that don't expose this attribute are no-ops.
@@ -1328,14 +1278,22 @@ class Runtime:
                     },
                 )
 
-            # Wrap the existing on_token (if any) so cross-channel
-            # browsers also see streaming tokens. The original channel
-            # callback still runs (Discord currently has none; this is
-            # future-proofing).
-            on_token = self._wrap_on_token_for_cross_channel_mirror(
-                original=on_token,
-                source_channel_id=turn.channel_id,
-            )
+        # Typing indicator: emit a single ``chat.message.typing_started``
+        # frame before the LLM stream runs so the browser can show a
+        # '正在输入...' bubble immediately. The message_id is derived
+        # from turn_id the same way channel.send derives it for
+        # ``chat.message.done``, so the client can replace the placeholder
+        # with the final content when done arrives. Replaces the prior
+        # per-token streaming path.
+        typing_message_id = abs(hash(turn.turn_id)) & 0x7FFFFFFF
+        self._publish_cross_channel_event(
+            "chat.message.typing_started",
+            {
+                "message_id": typing_message_id,
+                "turn_id": turn.turn_id,
+                "source_channel_id": turn.channel_id,
+            },
+        )
 
         with DbSession(self.ctx.engine) as db:
             turn_ctx = TurnContext(
@@ -1355,7 +1313,7 @@ class Runtime:
                 turn_ctx,
                 turn,
                 llm,
-                on_token=on_token,
+                on_token=None,
                 # Do NOT pass on_turn_done to assemble_turn — it would fire
                 # before channel.send, clearing the channel's _current_user_id
                 # and breaking Discord reply routing. We call on_turn_done

@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar
@@ -341,33 +341,6 @@ class WebChannel:
             )
             return
         await self._broadcaster.broadcast(event, payload)
-
-    def on_token_callback(self) -> Callable[[int, str], Awaitable[None]]:
-        """Return an ``on_token`` callable for :func:`assemble_turn`.
-
-        Runtime ``_handle_turn`` detects this method via ``getattr`` and
-        passes the returned callable as the ``on_token`` kwarg into
-        ``assemble_turn``. Each token delta arrives here and is
-        broadcast as a ``chat.message.token`` SSE event so every open
-        browser tab streams the persona reply in near-real-time.
-
-        The callback uses ``message_id`` (an int — ``id()`` of the
-        assembled turn placeholder per spec §17a.2) as the client-side
-        correlation key. Channels never round-trip this id back to
-        memory — it is purely a grouping handle for the client.
-        """
-
-        async def _push(message_id: int, delta: str) -> None:
-            await self.push_sse(
-                "chat.message.token",
-                {
-                    "message_id": message_id,
-                    "delta": delta,
-                    "source_channel_id": self.channel_id,
-                },
-            )
-
-        return _push
 
     # ---- Runtime callback ------------------------------------------------
 

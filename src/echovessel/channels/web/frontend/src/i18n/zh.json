@@ -26,7 +26,8 @@
     "boundary_session_ended": "这次对话到这里结束",
     "boundary_session_started": "新对话开始",
     "source_discord": "📱 Discord",
-    "source_imessage": "💬 iMessage"
+    "source_imessage": "💬 iMessage",
+    "typing": "正在输入"
   },
   "time": {
     "just_now": "刚刚",

@@ -26,7 +26,8 @@
     "boundary_session_ended": "— conversation ended here —",
     "boundary_session_started": "— new conversation started —",
     "source_discord": "📱 Discord",
-    "source_imessage": "💬 iMessage"
+    "source_imessage": "💬 iMessage",
+    "typing": "Typing"
   },
   "time": {
     "just_now": "just now",

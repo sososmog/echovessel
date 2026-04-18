@@ -405,6 +405,16 @@ interface LetterProps {
 }
 
 function Letter({ content, voice, streaming }: LetterProps) {
+  // Typing indicator: streaming with no content yet = persona is
+  // generating a reply. Render a '正在输入...' label + iMessage-style
+  // three-dot animation instead of an empty bubble. Once the content
+  // arrives (via chat.message.done) streaming flips false and the
+  // normal paragraph render takes over.
+  const isTypingPlaceholder =
+    streaming && content.length === 1 && content[0] === ''
+  if (isTypingPlaceholder) {
+    return <TypingBubble />
+  }
   return (
     <div className="letter">
       {content.map((p, i) => {
@@ -417,6 +427,22 @@ function Letter({ content, voice, streaming }: LetterProps) {
         )
       })}
       {voice && <VoiceButton meta={voice} />}
+    </div>
+  )
+}
+
+function TypingBubble() {
+  const { t } = useTranslation()
+  return (
+    <div className="letter letter-typing" aria-live="polite">
+      <p className="typing-label">
+        {t('chat.typing')}
+        <span className="typing-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      </p>
     </div>
   )
 }

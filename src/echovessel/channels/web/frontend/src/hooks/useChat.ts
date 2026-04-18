@@ -10,11 +10,11 @@
  * Internals:
  *   - Uses `useSSE()` to receive the live stream
  *   - Tracks a flat timeline (messages + boundary markers) in one state
- *   - Streams persona replies token-by-token via `chat.message.token`
- *   - On `chat.message.done`, finalises the persona message with the
- *     authoritative content from the server (the accumulated token
- *     buffer is discarded in favour of `done.content` to avoid any
- *     client-side drift)
+ *   - On `chat.message.typing_started`, inserts an empty persona
+ *     placeholder with `streaming: true` so the UI can render a
+ *     typing indicator ("正在输入...")
+ *   - On `chat.message.done`, replaces the placeholder with the
+ *     authoritative content from the server
  *   - On `chat.message.user_appended`, appends a user message — this
  *     keeps multiple browser tabs in sync when the user types from one
  *     of them
@@ -43,13 +43,14 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'persona'
   content: string
-  /** True while `chat.message.token` events are still arriving. */
+  /** True between `chat.message.typing_started` and `chat.message.done`.
+   *  Consumed by the UI to render a typing indicator ("正在输入..."). */
   streaming: boolean
   /**
    * Server-assigned numeric id. Only set on persona messages, and only
-   * after the first `chat.message.token` event arrives (or the
-   * `chat.message.done` event if streaming was skipped). User messages
-   * do not carry a server id in MVP.
+   * after the `chat.message.typing_started` event (or the
+   * `chat.message.done` event if typing_started was skipped). User
+   * messages do not carry a server id in MVP.
    */
   message_id?: number
   /** ISO-8601 timestamp (client time when the message entered state). */
@@ -229,37 +230,31 @@ export function useChat(): UseChatResult {
           return
         }
 
-        case 'chat.message.token': {
-          const { message_id, delta, source_channel_id } = event.data
+        case 'chat.message.typing_started': {
+          const { message_id, source_channel_id } = event.data
           setMessages((prev) => {
-            // Find an existing persona message with this id and append
-            // the delta. If none exists yet (first token of the turn),
-            // create one.
-            const idx = prev.findIndex(
+            // Idempotent: if a placeholder with this message_id is
+            // already present (unlikely, but safe across reconnects),
+            // don't insert a duplicate.
+            const already = prev.some(
               (m) =>
                 !isBoundaryEntry(m) &&
                 m.role === 'persona' &&
                 m.message_id === message_id,
             )
-            if (idx === -1) {
-              return [
-                ...prev,
-                {
-                  id: newClientId(),
-                  role: 'persona',
-                  content: delta,
-                  streaming: true,
-                  message_id,
-                  timestamp: nowIso(),
-                  source_channel_id,
-                },
-              ]
-            }
-            const next = prev.slice()
-            const existing = next[idx]
-            if (!existing || isBoundaryEntry(existing)) return prev
-            next[idx] = { ...existing, content: existing.content + delta }
-            return next
+            if (already) return prev
+            return [
+              ...prev,
+              {
+                id: newClientId(),
+                role: 'persona',
+                content: '',
+                streaming: true,
+                message_id,
+                timestamp: nowIso(),
+                source_channel_id,
+              },
+            ]
           })
           return
         }
@@ -315,6 +310,23 @@ export function useChat(): UseChatResult {
 
         case 'chat.message.error': {
           setError(event.data.error)
+          // Clear any streaming placeholder for this turn so the typing
+          // indicator doesn't hang next to an error banner. If
+          // message_id is non-null, drop just that placeholder; if null,
+          // drop any still-streaming persona message as a conservative
+          // fallback (there is at most one at any time).
+          const errorMessageId = event.data.message_id
+          setMessages((prev) =>
+            prev.filter((m) => {
+              if (isBoundaryEntry(m)) return true
+              if (m.role !== 'persona') return true
+              if (!m.streaming) return true
+              if (errorMessageId !== null && m.message_id !== errorMessageId) {
+                return true
+              }
+              return false
+            }),
+          )
           return
         }
 

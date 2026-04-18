@@ -238,12 +238,18 @@ export interface ChatMessageUserAppendedData {
   source_channel_id?: string
 }
 
-export interface ChatMessageTokenData {
+/**
+ * Emitted once per turn, right before the LLM stream starts. The
+ * frontend inserts a placeholder persona bubble with streaming=true
+ * and an empty content string so the UI can show a '正在输入...'
+ * typing indicator. When ``chat.message.done`` arrives with the same
+ * ``message_id``, the placeholder is replaced with the final content.
+ */
+export interface ChatMessageTypingStartedData {
   message_id: number
-  delta: string
+  turn_id: string
   /** Worker X · mirrors ``source_channel_id`` on the ``user_appended``
-   *  event so the streaming tokens attach to the right pill-tagged
-   *  bubble in multi-channel views. */
+   *  event so multi-channel views tag the typing bubble correctly. */
   source_channel_id?: string
 }
 
@@ -336,7 +342,7 @@ export type ChatEvent =
   | { event: 'chat.connection.ready'; data: ChatConnectionReadyData }
   | { event: 'chat.connection.heartbeat'; data: ChatConnectionHeartbeatData }
   | { event: 'chat.message.user_appended'; data: ChatMessageUserAppendedData }
-  | { event: 'chat.message.token'; data: ChatMessageTokenData }
+  | { event: 'chat.message.typing_started'; data: ChatMessageTypingStartedData }
   | { event: 'chat.message.done'; data: ChatMessageDoneData }
   | { event: 'chat.settings.updated'; data: ChatSettingsUpdatedData }
   | { event: 'chat.session.boundary'; data: ChatSessionBoundaryData }
@@ -353,7 +359,7 @@ export const KNOWN_CHAT_EVENT_NAMES: readonly ChatEvent['event'][] = [
   'chat.connection.ready',
   'chat.connection.heartbeat',
   'chat.message.user_appended',
-  'chat.message.token',
+  'chat.message.typing_started',
   'chat.message.done',
   'chat.settings.updated',
   'chat.session.boundary',
