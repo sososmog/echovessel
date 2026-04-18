@@ -80,13 +80,32 @@ def create_engine(db_path: str | Path, echo: bool = False) -> Engine:
 
     engine = _sa_create_engine(url, echo=echo)
 
-    # Load sqlite-vec on every new connection. SQLAlchemy fires `connect` on
-    # each underlying DBAPI connection, so this survives connection pooling.
+    # On every new connection: load sqlite-vec, switch to WAL journaling,
+    # and set a generous busy timeout. Multiple actors share the same
+    # ``memory.db`` (Web + Discord ingest, idle scanner, consolidate
+    # worker, proactive scheduler) and the daemon is single-process, so
+    # WAL gives concurrent readers + one writer instead of the default
+    # rollback-journal mode where every reader blocks every writer. The
+    # busy timeout makes that one writer wait up to five seconds for an
+    # in-flight transaction to commit instead of immediately raising
+    # ``OperationalError: database is locked`` — which is what was
+    # killing catchup consolidate when discord ingest happened to commit
+    # in the same window. ``:memory:`` accepts the PRAGMAs but treats
+    # WAL as a no-op (no file = no journal); leaving the call in place
+    # keeps the production and test code paths identical.
     @event.listens_for(engine, "connect")
-    def _load_sqlite_vec(dbapi_connection, _connection_record):
+    def _on_connect(dbapi_connection, _connection_record):
         dbapi_connection.enable_load_extension(True)
         sqlite_vec.load(dbapi_connection)
         dbapi_connection.enable_load_extension(False)
+
+        cur = dbapi_connection.cursor()
+        try:
+            cur.execute("PRAGMA journal_mode = WAL")
+            cur.execute("PRAGMA synchronous = NORMAL")
+            cur.execute("PRAGMA busy_timeout = 5000")
+        finally:
+            cur.close()
 
     return engine
 

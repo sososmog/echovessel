@@ -232,6 +232,14 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# eval/ tests hit the real LLM and cost real money; default-skip them so
+# `pytest` and `pytest tests/` stay free / deterministic. Opt in with
+# `pytest -m eval` to pay for one run, or `pytest -m "eval or not eval"`
+# to run the whole suite. CI runs them only on the nightly cron.
+addopts = "-m 'not eval'"
+markers = [
+    "eval: hits live LLM via the configured provider; costs real money. Skipped unless `-m eval` is passed.",
+]
 
 [tool.importlinter]
 root_package = "echovessel"
