@@ -212,6 +212,13 @@ async def run_pipeline(
                     "stage": "extraction",
                 },
             )
+            # Audit P1-8: advance progress past a failed chunk so a
+            # subsequent resume does not re-extract the same chunk and
+            # risk duplicating any items that may have committed
+            # before the failure. Failed chunks are not auto-retried;
+            # the operator can re-import the file to replay them.
+            if progress is not None and not exc.fatal:
+                progress.current_chunk = chunk_index_global + 1
             if exc.fatal:
                 fatal_error = str(exc)
                 break
@@ -255,6 +262,11 @@ async def run_pipeline(
                     "stage": "dispatch",
                 },
             )
+            # Audit P1-8: advance progress past a failed dispatch.
+            # See the matching comment on the extraction branch above
+            # for the rationale.
+            if progress is not None:
+                progress.current_chunk = chunk_index_global + 1
             continue
 
         all_new_concept_ids.extend(chunk_new_ids)
