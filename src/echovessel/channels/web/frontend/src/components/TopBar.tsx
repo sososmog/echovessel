@@ -1,3 +1,5 @@
+import { LanguageToggle } from './LanguageToggle'
+
 interface TopBarAction {
   label: string
   onClick: () => void
@@ -26,6 +28,7 @@ export function TopBar({ mood, primary, back }: TopBarProps) {
           <span className="mood-rule" />
           <span>{mood ?? '—'}</span>
         </div>
+        <LanguageToggle />
         {primary && (
           <button
             type="button"

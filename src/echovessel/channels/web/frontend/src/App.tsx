@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import {
   BrowserRouter,
   Navigate,
@@ -169,6 +170,7 @@ function BootScreen() {
 }
 
 function BootError({ message }: { message: string }) {
+  const { t } = useTranslation()
   return (
     <div className="boot">
       <div
@@ -188,7 +190,7 @@ function BootError({ message }: { message: string }) {
           padding: '0 32px',
         }}
       >
-        无法连接到本地 daemon · {message}
+        {t('boot.cannot_reach_daemon', { message })}
       </div>
     </div>
   )

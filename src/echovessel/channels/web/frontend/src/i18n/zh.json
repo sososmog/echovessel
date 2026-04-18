@@ -1,0 +1,154 @@
+{
+  "language": {
+    "name_zh": "中文",
+    "name_en": "English",
+    "switch_to_en_aria": "切换到英文",
+    "switch_to_zh_aria": "切换到中文"
+  },
+  "boot": {
+    "cannot_reach_daemon": "无法连接到本地 daemon · {{message}}"
+  },
+  "topbar": {
+    "admin": "管理",
+    "back_to_chat": "返回对话",
+    "mood_unset": "—"
+  },
+  "chat": {
+    "mood_default": "平静、愿意倾听",
+    "placeholder": "想说点什么⋯",
+    "send": "发送",
+    "empty": "还没有消息。随便说点什么开始吧。",
+    "load_more": "↑ 加载更早的消息",
+    "loading": "加载中⋯",
+    "at_oldest": "已经是最早的消息",
+    "voice_playing": "播放中",
+    "voice_label": "语音",
+    "boundary_session_ended": "这次对话到这里结束",
+    "boundary_session_started": "新对话开始",
+    "source_discord": "📱 Discord",
+    "source_imessage": "💬 iMessage"
+  },
+  "time": {
+    "just_now": "刚刚",
+    "minutes_ago": "{{count}} 分钟前",
+    "hours_ago": "{{count}} 小时前",
+    "days_ago": "{{count}} 天前"
+  },
+  "admin": {
+    "page_title": "管理",
+    "subtitle_prefix": "在 admin 页面",
+    "tabs": {
+      "persona": "人格",
+      "events": "发生过的事",
+      "thoughts": "长期印象",
+      "voice": "声音",
+      "cost": "成本",
+      "config": "配置",
+      "memory": "记忆"
+    },
+    "common": {
+      "save": "保存",
+      "cancel": "取消",
+      "saved": "已保存 ✓",
+      "saving": "保存中⋯",
+      "unsaved_warning": "有未保存的修改",
+      "confirm_discard": "丢弃未保存的修改吗?",
+      "delete": "删除",
+      "deleting": "删除中⋯",
+      "loading": "加载中⋯",
+      "close": "关闭",
+      "refresh": "刷新"
+    },
+    "persona": {
+      "section_title": "人格核心",
+      "display_name_label": "显示名",
+      "display_name_placeholder": "她 / 他 / 某个称呼",
+      "display_name_save": "保存显示名",
+      "persona_block_label": "Persona block",
+      "persona_block_help": "她是谁 · 性格 · 价值观 · 说话风格",
+      "self_block_label": "Self block",
+      "self_block_help": "第一人称 · 她怎么看自己",
+      "user_block_label": "User block",
+      "user_block_help": "第三人称 · 她对你的了解",
+      "mood_block_label": "Mood block",
+      "mood_block_help": "当前情绪 · 会随时间演化",
+      "relationship_block_label": "Relationship block",
+      "relationship_block_help": "关系描述",
+      "import_prompt": "有历史材料想让 persona 记住?",
+      "import_cta": "使用 LLM 导入",
+      "save_persona": "保存人格"
+    },
+    "voice": {
+      "section_title": "声音",
+      "enabled_label": "启用语音",
+      "enabled_help": "开启后 persona 的回复会同时生成音频",
+      "voice_id_label": "Voice ID",
+      "voice_id_help": "当前使用的声音 · 来自 FishAudio 模型库",
+      "clone_cta": "克隆新声音",
+      "no_samples": "还没有上传样本。点 '克隆新声音' 开始。",
+      "provider_not_configured": "未配置 TTS provider · 请检查 config.toml 的 [voice] 段"
+    },
+    "memory": {
+      "section_title": "记忆",
+      "search_placeholder": "搜索记忆⋯",
+      "search_cta": "搜索",
+      "results_count": "{{count}} 条结果",
+      "no_results": "没有匹配的记忆",
+      "preview_delete": "预览删除影响",
+      "delete_confirm_title": "删除这条记忆?",
+      "delete_confirm_body": "这个操作不可撤销。下面列出将被连带影响的事件和反思。",
+      "core_block_label": "L1 · 人格核心",
+      "recall_label": "L2 · 原始对话",
+      "event_label": "L3 · 事件",
+      "thought_label": "L4 · 反思"
+    },
+    "events": {
+      "section_title": "发生过的事",
+      "empty": "还没有事件 · 和 persona 聊一会儿 · 她会自己总结出来"
+    },
+    "thoughts": {
+      "section_title": "长期印象",
+      "empty": "还没有长期印象 · 事件够多之后她会自己反思出来"
+    },
+    "cost": {
+      "section_title": "成本"
+    },
+    "config": {
+      "section_title": "配置",
+      "placeholder_notice": "配置面板下一版会支持 · 现在请直接编辑 ~/.echovessel/config.toml 然后 `echovessel reload`"
+    }
+  },
+  "onboarding": {
+    "welcome_title": "第一次启动",
+    "welcome_subtitle": "用几分钟给你的 persona 一个开头",
+    "path_blank_title": "手填 5 个 block",
+    "path_blank_body": "一行行描述她是谁 · 她怎么看自己 · 她对你的了解 · 当前情绪 · 你们的关系",
+    "path_material_title": "从材料导入",
+    "path_material_body": "粘贴一段自传 / 日记 / 角色设定 · LLM 自动起草 5 个 block 让你审核",
+    "path_blank_cta": "手填开始",
+    "path_material_cta": "上传材料",
+    "name_label": "给她起个名字",
+    "name_placeholder": "她",
+    "persona_label": "Persona",
+    "persona_placeholder": "她是谁 · 性格 · 说话方式 · 价值观",
+    "self_label": "Self(第一人称)",
+    "self_placeholder": "可以留空 · 聊着聊着会自己长出来",
+    "user_label": "User(关于你)",
+    "user_placeholder": "可以留空 · 她会慢慢了解你",
+    "mood_label": "Mood",
+    "mood_placeholder": "比如 '平静' / '好奇'",
+    "submit_cta": "开始对话",
+    "material_upload_cta": "选择文件",
+    "material_paste_label": "或者直接粘贴文字",
+    "material_paste_placeholder": "粘贴自传 · 角色设定 · 日记段落⋯",
+    "material_draft_cta": "让 LLM 起草",
+    "material_review_title": "审核 LLM 起草的 5 个 block",
+    "back": "返回"
+  },
+  "errors": {
+    "generic": "出错了 · 请稍后再试",
+    "network": "网络错误 · 请检查 daemon 是否还在运行",
+    "send_failed": "发送失败",
+    "save_failed": "保存失败"
+  }
+}

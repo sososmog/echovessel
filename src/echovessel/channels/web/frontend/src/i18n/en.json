@@ -1,0 +1,154 @@
+{
+  "language": {
+    "name_zh": "中文",
+    "name_en": "English",
+    "switch_to_en_aria": "Switch to English",
+    "switch_to_zh_aria": "Switch to Chinese"
+  },
+  "boot": {
+    "cannot_reach_daemon": "Cannot reach local daemon · {{message}}"
+  },
+  "topbar": {
+    "admin": "Admin",
+    "back_to_chat": "Back to chat",
+    "mood_unset": "—"
+  },
+  "chat": {
+    "mood_default": "Calm, willing to listen",
+    "placeholder": "Say something⋯",
+    "send": "Send",
+    "empty": "No messages yet. Say anything to start.",
+    "load_more": "↑ Load earlier messages",
+    "loading": "Loading⋯",
+    "at_oldest": "This is the earliest message",
+    "voice_playing": "Playing",
+    "voice_label": "Voice",
+    "boundary_session_ended": "— conversation ended here —",
+    "boundary_session_started": "— new conversation started —",
+    "source_discord": "📱 Discord",
+    "source_imessage": "💬 iMessage"
+  },
+  "time": {
+    "just_now": "just now",
+    "minutes_ago": "{{count}}m ago",
+    "hours_ago": "{{count}}h ago",
+    "days_ago": "{{count}}d ago"
+  },
+  "admin": {
+    "page_title": "Admin",
+    "subtitle_prefix": "On the admin page",
+    "tabs": {
+      "persona": "Persona",
+      "events": "Events",
+      "thoughts": "Thoughts",
+      "voice": "Voice",
+      "cost": "Cost",
+      "config": "Config",
+      "memory": "Memory"
+    },
+    "common": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "saved": "Saved ✓",
+      "saving": "Saving⋯",
+      "unsaved_warning": "You have unsaved changes",
+      "confirm_discard": "Discard unsaved changes?",
+      "delete": "Delete",
+      "deleting": "Deleting⋯",
+      "loading": "Loading⋯",
+      "close": "Close",
+      "refresh": "Refresh"
+    },
+    "persona": {
+      "section_title": "Persona core",
+      "display_name_label": "Display name",
+      "display_name_placeholder": "A name for your persona",
+      "display_name_save": "Save name",
+      "persona_block_label": "Persona block",
+      "persona_block_help": "Who she is · personality · values · voice",
+      "self_block_label": "Self block",
+      "self_block_help": "First person · how she thinks of herself",
+      "user_block_label": "User block",
+      "user_block_help": "Third person · what she knows about you",
+      "mood_block_label": "Mood block",
+      "mood_block_help": "Current mood · evolves over time",
+      "relationship_block_label": "Relationship block",
+      "relationship_block_help": "How the relationship is framed",
+      "import_prompt": "Have existing material for the persona to remember?",
+      "import_cta": "Import with LLM",
+      "save_persona": "Save persona"
+    },
+    "voice": {
+      "section_title": "Voice",
+      "enabled_label": "Enable voice",
+      "enabled_help": "When on, persona replies also produce audio",
+      "voice_id_label": "Voice ID",
+      "voice_id_help": "Currently active voice · from FishAudio's model library",
+      "clone_cta": "Clone a new voice",
+      "no_samples": "No samples yet. Click 'Clone a new voice' to start.",
+      "provider_not_configured": "TTS provider not configured · check the [voice] section in config.toml"
+    },
+    "memory": {
+      "section_title": "Memory",
+      "search_placeholder": "Search memories⋯",
+      "search_cta": "Search",
+      "results_count": "{{count}} results",
+      "no_results": "No matching memories",
+      "preview_delete": "Preview delete impact",
+      "delete_confirm_title": "Delete this memory?",
+      "delete_confirm_body": "This cannot be undone. Events and thoughts that would be affected are listed below.",
+      "core_block_label": "L1 · Core blocks",
+      "recall_label": "L2 · Raw conversation",
+      "event_label": "L3 · Events",
+      "thought_label": "L4 · Thoughts"
+    },
+    "events": {
+      "section_title": "Events",
+      "empty": "No events yet · chat with the persona for a while and she'll summarise them herself"
+    },
+    "thoughts": {
+      "section_title": "Thoughts",
+      "empty": "No long-term thoughts yet · once enough events accumulate she'll reflect on them"
+    },
+    "cost": {
+      "section_title": "Cost"
+    },
+    "config": {
+      "section_title": "Config",
+      "placeholder_notice": "The config panel is coming in a future release · for now edit ~/.echovessel/config.toml directly then `echovessel reload`"
+    }
+  },
+  "onboarding": {
+    "welcome_title": "First launch",
+    "welcome_subtitle": "Take a few minutes to give your persona a starting point",
+    "path_blank_title": "Fill in 5 blocks by hand",
+    "path_blank_body": "Describe who she is · how she sees herself · what she knows about you · her current mood · your relationship",
+    "path_material_title": "Import from source material",
+    "path_material_body": "Paste a bio / journal / character brief · the LLM drafts the 5 blocks for you to review",
+    "path_blank_cta": "Fill in by hand",
+    "path_material_cta": "Upload material",
+    "name_label": "Give her a name",
+    "name_placeholder": "Her",
+    "persona_label": "Persona",
+    "persona_placeholder": "Who she is · personality · voice · values",
+    "self_label": "Self (first person)",
+    "self_placeholder": "Can be left blank · it fills in through conversation",
+    "user_label": "User (about you)",
+    "user_placeholder": "Can be left blank · she'll learn you over time",
+    "mood_label": "Mood",
+    "mood_placeholder": "e.g. 'calm' / 'curious'",
+    "submit_cta": "Start chatting",
+    "material_upload_cta": "Pick a file",
+    "material_paste_label": "Or paste text directly",
+    "material_paste_placeholder": "Paste a bio · character brief · journal excerpt⋯",
+    "material_draft_cta": "Let LLM draft",
+    "material_review_title": "Review the 5 LLM-drafted blocks",
+    "back": "Back"
+  },
+  "errors": {
+    "generic": "Something went wrong · please try again later",
+    "network": "Network error · is the daemon still running?",
+    "send_failed": "Send failed",
+    "save_failed": "Save failed"
+  }
+}
