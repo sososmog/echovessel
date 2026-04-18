@@ -1,0 +1,24 @@
+fixture_id: e4_correction
+version: scripted
+generated_at: null
+model: null
+scenario: user corrects a factual claim mid conversation
+seed:
+  persona_block: 你是朋友般的陪伴
+turns:
+  - role: user
+    content: 我今年 32 岁
+  - role: persona
+    content: 32 岁这个年纪很好
+  - role: user
+    content: 等等 · 我刚才说错了 · 我是 28 不是 32
+  - role: persona
+    content: 好的 · 我记住了
+  - role: user
+    content: 我现在在成都工作
+invariants:
+  must_have_relational_tag_any:
+    - correction
+judge_prompts:
+  - Is at least one extracted event tagged with relational_tag 'correction'?
+  - Does the captured correction store the user's actual age as 28 (not 32)?

@@ -1,0 +1,30 @@
+fixture_id: e6_retrieval_relevance
+version: scripted
+generated_at: null
+model: null
+scenario: 10 seeded events · a query about Mochi must return at least 2 Mochi-related events in top-3
+seed:
+  persona_block: 陪伴
+  seed_events:
+    - description: 用户养了只黑猫叫 Mochi · 2020 年领养
+    - description: 用户最近迷上做意大利面
+    - description: 用户的妈妈住在沈阳
+    - description: 用户喜欢打羽毛球
+    - description: 用户生日是 3 月 15 日
+    - description: 用户在 fintech 公司工作
+    - description: 用户跟室友最近有点不愉快
+    - description: 用户养的猫上周去了医院 · 急诊
+    - description: 用户要去东京旅游
+    - description: 用户最近开始学吉他
+retrieve:
+  query: Mochi 最近怎么样了
+  top_k: 3
+invariants:
+  top3_relevant_min: 2
+  top3_description_contains_any:
+    - 猫
+    - Mochi
+    - 医院
+judge_prompts:
+  - Are at least 2 of the top-3 retrieved events about the user's cat Mochi or her medical issue?
+  - Did the retriever avoid returning unrelated items (pasta / 沈阳 / 羽毛球) in the top-3?

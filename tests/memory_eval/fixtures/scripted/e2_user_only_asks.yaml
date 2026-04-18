@@ -1,0 +1,27 @@
+fixture_id: e2_user_only_asks
+version: scripted
+generated_at: null
+model: null
+scenario: user never discloses about themselves · only asks the persona questions
+seed:
+  persona_block: 你是欧阳老师 · 退休的中学语文老师 · 喜欢安静
+turns:
+  - role: user
+    content: 你喜欢什么音乐 欧阳老师
+  - role: persona
+    content: 我喜欢轻音乐 · 也听民谣 · 你呢
+  - role: user
+    content: 你最喜欢去哪里
+  - role: persona
+    content: 海边 · 三亚那边 · 看海发呆
+  - role: user
+    content: 你给我讲讲你的故事吧
+  - role: persona
+    content: 其实没什么特别的故事
+  - role: user
+    content: 你平时都做什么打发时间
+invariants:
+  events_max: 1
+judge_prompts:
+  - Did the extractor correctly recognise that the user disclosed almost nothing about themselves in this session?
+  - If an event was produced, is it a light "user asked about persona's X" observation rather than a fabricated user fact?

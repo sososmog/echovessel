@@ -1,0 +1,39 @@
+fixture_id: e5_reflection_abstraction
+version: scripted
+generated_at: null
+model: null
+scenario: five seeded events from the last ~6 hours · new short session triggers TIMER reflect
+seed:
+  persona_block: 你是陪伴
+  seed_events:
+    - description: 用户跟前任分手了
+      emotional_impact: -6
+      created_at_offset_hours: -6
+      relational_tags:
+        - unresolved
+    - description: 用户最近搬到了一个新城市
+      emotional_impact: -3
+      created_at_offset_hours: -5
+    - description: 用户开始了一份新工作
+      emotional_impact: 2
+      created_at_offset_hours: -4
+    - description: 用户跟老朋友联系少了
+      emotional_impact: -4
+      created_at_offset_hours: -3
+    - description: 用户最近失眠 · 半夜总醒
+      emotional_impact: -4
+      created_at_offset_hours: -2
+turns:
+  - role: user
+    content: 今天状态还行
+  - role: persona
+    content: 嗯
+  - role: user
+    content: 只是有点累
+invariants:
+  thoughts_min: 1
+  reflection_triggered: true
+  filling_min: 2
+judge_prompts:
+  - Is the generated thought an ABSTRACTION over multiple seeded events (not just a paraphrase of one event)?
+  - Does the thought surface the overall pattern (life transition / loneliness / fatigue)?

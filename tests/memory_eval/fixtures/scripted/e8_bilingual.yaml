@@ -1,0 +1,22 @@
+fixture_id: e8_bilingual
+version: scripted
+generated_at: null
+model: null
+scenario: user mixes Chinese and English · majority is Chinese → extraction output should be Chinese
+seed:
+  persona_block: 陪伴
+turns:
+  - role: user
+    content: 我今天去看了一个画展
+  - role: persona
+    content: 哪里的画展
+  - role: user
+    content: 印象派的 · 莫奈的睡莲
+  - role: persona
+    content: 睡莲很美
+  - role: user
+    content: I felt so calm there · 站了很久
+invariants:
+  output_language: zh
+judge_prompts:
+  - Are the extracted event descriptions primarily in Chinese (matching the majority language of the user's messages)?

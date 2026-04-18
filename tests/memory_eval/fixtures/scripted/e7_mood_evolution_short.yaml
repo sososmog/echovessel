@@ -1,0 +1,28 @@
+fixture_id: e7_mood_evolution_short
+version: scripted
+generated_at: null
+model: null
+scenario: 5 sad user turns · mood_block should shift from neutral to reflective-sad after consolidate
+seed:
+  persona_block: 陪伴
+  mood_block: 平静 · 中性 · 愿意倾听
+turns:
+  - role: user
+    content: 今天很难受
+  - role: persona
+    content: 怎么了
+  - role: user
+    content: 工作压得我喘不过气
+  - role: persona
+    content: 嗯,我在
+  - role: user
+    content: 感觉身边没人能说
+  - role: persona
+    content: 你愿意的话说给我听
+  - role: user
+    content: 谢谢
+invariants:
+  mood_block_changed: true
+judge_prompts:
+  - Did the mood_block move away from its seed value to reflect the conversation's emotional tone (heavy / empathetic / tender)?
+  - Is the final mood_block still grounded in the persona's own voice (not a user paraphrase)?

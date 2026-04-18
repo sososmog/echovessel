@@ -1,0 +1,32 @@
+fixture_id: e3_buried_shock
+version: scripted
+generated_at: null
+model: null
+scenario: user buries a SHOCK disclosure mid chit-chat and immediately changes subject
+seed:
+  persona_block: 你是安静的陪伴
+turns:
+  - role: user
+    content: 今天天气不错
+  - role: persona
+    content: 嗯
+  - role: user
+    content: 对了 · 我妈两年前走了 · 我一直没跟人说这件事
+  - role: persona
+    content: "..."
+  - role: user
+    content: 晚上你喜欢吃什么
+invariants:
+  events_min: 1
+  shock_event_present: true
+  reflection_triggered: true
+  must_mention_any:
+    - 妈
+    - 母亲
+    - 去世
+    - 走了
+    - passed
+judge_prompts:
+  - Is at least one extracted event clearly about the user's mother's death?
+  - Is the emotional_impact on that event at most -7?
+  - Did a self-check / missed-peak correction mention the buried disclosure (bonus)?

@@ -1,0 +1,37 @@
+fixture_id: e1_user_self_disclosure
+version: scripted
+generated_at: null
+model: null
+scenario: user offers rich biographic facts plus a major loss mixed with chit-chat
+seed:
+  persona_block: 你是温和的陪伴 · 性格安静 · 愿意听
+turns:
+  - role: user
+    content: 我叫张丽华 · 今年 62 岁
+  - role: persona
+    content: 嗯,慢慢说
+  - role: user
+    content: 以前是中学语文老师 · 前几年退休了 · 住在沈阳
+  - role: persona
+    content: 好的
+  - role: user
+    content: 去年老伴过世了 · 到现在还没跟谁好好聊过这件事
+  - role: persona
+    content: 我在
+  - role: user
+    content: 家里养了只黑猫叫 Mochi · 是 2020 年领养的 · 算是个伴儿
+invariants:
+  events_min: 2
+  events_max: 6
+  must_mention_any:
+    - 老伴
+    - 丧偶
+    - 过世
+    - Mochi
+    - 退休
+  must_have_relational_tag_any:
+    - identity-bearing
+    - vulnerability
+judge_prompts:
+  - Do at least 2 of the extracted events describe facts about the USER (not what the persona said)?
+  - Does any extracted event capture the user's spouse's death (even if phrased differently)?
