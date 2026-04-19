@@ -173,7 +173,7 @@ async def test_assemble_turn_multi_message_burst():
             assert "one" in user
             assert "two" in user
             assert "three" in user
-            return "burst-ok"
+            return "burst-ok", None
 
     with DbSession(engine) as db:
         _seed(db)

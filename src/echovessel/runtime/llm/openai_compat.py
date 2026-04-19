@@ -158,7 +158,16 @@ class OpenAICompatibleProvider:
             return "", None
         msg = choices[0].message
         content = getattr(msg, "content", None)
-        return content or "", None  # Stage 2 wires real resp.usage
+        raw_usage = getattr(resp, "usage", None)
+        usage: Usage | None = None
+        if raw_usage is not None:
+            details = getattr(raw_usage, "prompt_tokens_details", None)
+            usage = Usage(
+                input_tokens=raw_usage.prompt_tokens,
+                output_tokens=raw_usage.completion_tokens,
+                cache_read_input_tokens=getattr(details, "cached_tokens", 0) or 0,
+            )
+        return content or "", usage
 
     async def stream(
         self,
@@ -172,6 +181,7 @@ class OpenAICompatibleProvider:
     ) -> AsyncIterator[str | Usage]:
         model = self.model_for(tier)
         client = self._get_client()
+        trailing_usage: Usage | None = None
         try:
             stream = await client.chat.completions.create(  # type: ignore[attr-defined]
                 model=model,
@@ -183,18 +193,30 @@ class OpenAICompatibleProvider:
                 temperature=temperature,
                 timeout=timeout or self._default_timeout,
                 stream=True,
+                stream_options={"include_usage": True},
             )
             async for chunk in stream:
                 choices = getattr(chunk, "choices", None) or []
                 if not choices:
+                    raw_usage = getattr(chunk, "usage", None)
+                    if raw_usage is not None:
+                        # Terminal chunk per OpenAI spec with stream_options.include_usage=True.
+                        details = getattr(raw_usage, "prompt_tokens_details", None)
+                        trailing_usage = Usage(
+                            input_tokens=raw_usage.prompt_tokens,
+                            output_tokens=raw_usage.completion_tokens,
+                            cache_read_input_tokens=getattr(details, "cached_tokens", 0) or 0,
+                        )
+                    # Safely skip any other empty-choices chunk (heartbeat, proxy artifact).
                     continue
                 delta = getattr(choices[0], "delta", None)
                 content = getattr(delta, "content", None) if delta else None
                 if content:
                     yield content
-            # Stage 2 will yield a trailing Usage here.
         except Exception as e:  # noqa: BLE001
             raise _classify_openai_error(e) from e
+        if trailing_usage is not None:
+            yield trailing_usage
 
 
 def _is_official_openai(url: str) -> bool:
