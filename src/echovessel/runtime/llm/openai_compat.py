@@ -26,6 +26,7 @@ from echovessel.runtime.llm.errors import (
     LLMPermanentError,
     LLMTransientError,
 )
+from echovessel.runtime.llm.usage import Usage
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class OpenAICompatibleProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> str:
+    ) -> tuple[str, Usage | None]:
         model = self.model_for(tier)
         client = self._get_client()
         try:
@@ -154,10 +155,10 @@ class OpenAICompatibleProvider:
 
         choices = getattr(resp, "choices", None) or []
         if not choices:
-            return ""
+            return "", None
         msg = choices[0].message
         content = getattr(msg, "content", None)
-        return content or ""
+        return content or "", None  # Stage 2 wires real resp.usage
 
     async def stream(
         self,
@@ -168,7 +169,7 @@ class OpenAICompatibleProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[str | Usage]:
         model = self.model_for(tier)
         client = self._get_client()
         try:
@@ -191,6 +192,7 @@ class OpenAICompatibleProvider:
                 content = getattr(delta, "content", None) if delta else None
                 if content:
                     yield content
+            # Stage 2 will yield a trailing Usage here.
         except Exception as e:  # noqa: BLE001
             raise _classify_openai_error(e) from e
 

@@ -44,6 +44,7 @@ from sqlmodel import Field, SQLModel, select
 from sqlmodel import Session as DbSession
 
 from echovessel.runtime.llm.base import LLMProvider, LLMTier
+from echovessel.runtime.llm.usage import Usage
 
 log = logging.getLogger(__name__)
 
@@ -250,6 +251,7 @@ class CostRecorder:
         output_text: str,
         turn_id: str | None = None,
         timestamp: datetime | None = None,
+        usage: Usage | None = None,  # Stage 2 will prefer this over _count_tokens
     ) -> LLMCallRecord | None:
         tokens_in = _count_tokens(input_text)
         tokens_out = _count_tokens(output_text)
@@ -311,8 +313,8 @@ class CostTrackingProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> str:
-        result = await self._inner.complete(
+    ) -> tuple[str, Usage | None]:
+        text, usage = await self._inner.complete(
             system,
             user,
             tier=tier,
@@ -320,8 +322,8 @@ class CostTrackingProvider:
             temperature=temperature,
             timeout=timeout,
         )
-        self._record(tier, system, user, result)
-        return result
+        self._record(tier, system, user, text, usage=usage)
+        return text, usage
 
     async def stream(
         self,
@@ -332,9 +334,10 @@ class CostTrackingProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[str | Usage]:
         chunks: list[str] = []
-        async for chunk in self._inner.stream(
+        trailing_usage: Usage | None = None
+        async for item in self._inner.stream(
             system,
             user,
             tier=tier,
@@ -342,9 +345,12 @@ class CostTrackingProvider:
             temperature=temperature,
             timeout=timeout,
         ):
-            chunks.append(chunk)
-            yield chunk
-        self._record(tier, system, user, "".join(chunks))
+            if isinstance(item, str):
+                chunks.append(item)
+                yield item
+            else:
+                trailing_usage = item
+        self._record(tier, system, user, "".join(chunks), usage=trailing_usage)
 
     def _record(
         self,
@@ -352,6 +358,8 @@ class CostTrackingProvider:
         system: str,
         user: str,
         output: str,
+        *,
+        usage: Usage | None = None,
     ) -> None:
         feature = _current_feature.get() or "unknown"
         turn_id = _current_turn_id.get()
@@ -364,6 +372,7 @@ class CostTrackingProvider:
                 input_text=f"{system}\n{user}",
                 output_text=output,
                 turn_id=turn_id,
+                usage=usage,
             )
         except Exception as e:  # noqa: BLE001
             log.warning("cost_logger: record_call raised: %s", e)

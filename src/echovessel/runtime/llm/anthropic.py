@@ -22,6 +22,7 @@ from echovessel.runtime.llm.errors import (
     LLMPermanentError,
     LLMTransientError,
 )
+from echovessel.runtime.llm.usage import Usage
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ class AnthropicProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> str:
+    ) -> tuple[str, Usage | None]:
         model = self.model_for(tier)
         client = self._get_client()
         try:
@@ -148,13 +149,13 @@ class AnthropicProvider:
             raise _classify_anthropic_error(e) from e
 
         if not getattr(resp, "content", None):
-            return ""
+            return "", None
         parts: list[str] = []
         for block in resp.content:
             text = getattr(block, "text", None)
             if isinstance(text, str):
                 parts.append(text)
-        return "".join(parts)
+        return "".join(parts), None  # Stage 2 wires real resp.usage
 
     async def stream(
         self,
@@ -165,7 +166,7 @@ class AnthropicProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[str | Usage]:
         model = self.model_for(tier)
         client = self._get_client()
         try:
@@ -179,6 +180,7 @@ class AnthropicProvider:
             ) as stream:
                 async for delta in stream.text_stream:
                     yield delta
+            # Stage 2 will yield a trailing Usage here.
         except Exception as e:  # noqa: BLE001
             raise _classify_anthropic_error(e) from e
 

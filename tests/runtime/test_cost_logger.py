@@ -32,6 +32,7 @@ from echovessel.runtime.cost_logger import (
     summarize,
 )
 from echovessel.runtime.llm.base import LLMTier
+from echovessel.runtime.llm.usage import Usage
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -70,9 +71,9 @@ class _FakeProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> str:
+    ) -> tuple[str, Usage | None]:
         self.complete_calls.append({"system": system, "user": user, "tier": tier})
-        return "ok response"
+        return "ok response", None
 
     async def stream(
         self,
@@ -83,7 +84,7 @@ class _FakeProvider:
         max_tokens: int = 1024,
         temperature: float = 0.7,
         timeout: float | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[str | Usage]:
         self.stream_calls.append({"system": system, "user": user, "tier": tier})
         for piece in ("hel", "lo ", "wor", "ld"):
             yield piece
@@ -147,8 +148,9 @@ async def test_tracking_provider_records_complete_call() -> None:
     wrapped = CostTrackingProvider(inner, recorder)
 
     with feature_context("chat", turn_id="turn-1"):
-        result = await wrapped.complete("sys", "usr", tier=LLMTier.LARGE)
+        result, usage = await wrapped.complete("sys", "usr", tier=LLMTier.LARGE)
     assert result == "ok response"
+    assert usage is None
     assert inner.complete_calls  # delegated
 
     with DbSession(engine) as db:

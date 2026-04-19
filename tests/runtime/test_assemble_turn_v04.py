@@ -84,7 +84,7 @@ class _TokenRecordingStub(StubProvider):
         temperature: float = 0.7,
         timeout: float | None = None,
     ) -> AsyncIterator[str]:
-        text = await self.complete(
+        text, _usage = await self.complete(
             system,
             user,
             tier=tier,
